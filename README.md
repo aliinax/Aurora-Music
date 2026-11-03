@@ -1,94 +1,109 @@
 <div align="center">
 
-<img src="docs/logo.png" width="150" alt="Aurora Music logo" />
+<img src="docs/logo.png" width="150" alt="AuroraMusic" />
 
-# 🎵 Aurora Music
+# 🎵 AuroraMusic
 
-**Sonic Stream Engine — free music streaming for the web & Android.**
+**Web y app de música: escucha cualquier canción que exista, completa, sin cuenta y sin anuncios.**
 
-Search and stream millions of tracks with a DevAurora X Music–powered engine,
-high-fidelity audio and a clean, - in 12 languages.
+[![APK Android](https://img.shields.io/github/v/release/DevAuroraX/Aurora-Music?style=flat-square&color=38bdf8&label=APK%20Android)](https://github.com/DevAuroraX/Aurora-Music/releases/latest)
+[![Web](https://img.shields.io/badge/web-music.aurorax.site-3ddc84?style=flat-square)](https://music.aurorax.site)
+[![Idiomas](https://img.shields.io/badge/idiomas-12-818cf8?style=flat-square)](#-idiomas)
 
-[![Release](https://img.shields.io/github/v/release/DevAuroraX/Aurora-Music?style=flat-square&color=38bdf8&label=latest%20release)](https://github.com/DevAuroraX/Aurora-Music/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Web%20%2B%20Android-3ddc84?style=flat-square)](https://music.aurorax.site)
-[![UI](https://img.shields.io/badge/UI-12%20languages-818cf8?style=flat-square)](#-languages)
-[![APK](https://img.shields.io/badge/APK-signed%20%2B%20verified-10b981?style=flat-square)](https://github.com/DevAuroraX/Aurora-Music/releases/latest)
-
-**[🌐 Open the Web App](https://music.aurorax.site)** &nbsp;·&nbsp;
-**[⬇️ Download for Android](https://github.com/DevAuroraX/Aurora-Music/releases/latest)** &nbsp;·&nbsp;
-**[💬 Join the Discord](https://discord.gg/pU9ckzwsut)**
-
-<img src="screenshots/desktop-home.png" width="820" alt="Aurora Music on desktop" />
-
-<img src="screenshots/mobile-home.png" width="270" alt="Aurora Music on mobile" /> &nbsp;&nbsp; <img src="screenshots/mobile-app-page.png" width="270" alt="Get the app page" />
+**[🌐 Abrir la web](https://music.aurorax.site)** · **[⬇️ Descargar la app (APK)](https://github.com/DevAuroraX/Aurora-Music/releases/latest/download/AuroraMusic.apk)** · **[💬 Nuestro Discord](https://discord.gg/pU9ckzwsut)**
 
 </div>
 
----
+AuroraMusic es la forma más libre de escuchar música. Es una página web de música gratis y, a la vez, una app de música para Android: buscas la canción que quieras y la escuchas completa, al instante, sin crear una cuenta y sin anuncios de ningún tipo.
 
-## ✨ Features
+Es un proyecto propio e independiente de nuestro grupo. La web y la app nacen de este repositorio, así que siempre sabes de dónde viene AuroraMusic y que lo que descargas es el original.
 
-- 🔎 **Powerful search engine** — finds songs, artists and albums through the DevAurora X Music engine
-- 🎧 **High-fidelity streaming** — adaptive audio up to 256 kbps AAC and Lossless FLAC
-- 🌍 **12 languages** — instant switching, no reload: English, Español, Português, Français, Deutsch, Italiano, Русский, 日本語， 한국어, 中文， العربية, हिन्दी
-- ❤️ **Favorites & custom albums** — build your own collections, all stored privately on your device (IndexedDB)
-- 🕘 **Playback & search history** — quick picks and recent searches, clearable at any time
-- 🔔 **System media controls** — play/pause from the notification, lock screen or headphones (Media Session API)
-- 📴 **Offline mode, YouTube Music style** — friendly skeletons and auto-recovery when the connection drops
-- 📱 **Native Android app** — the full web experience with native media controls and downloads via the `AndroidBridge` interface
+## ✨ Por qué AuroraMusic
 
-## 📱 Install on Android
+- 🎧 **Cualquier música que exista** — desde los éxitos del momento hasta la canción más difícil de encontrar. Canciones completas, de inicio a fin.
+- 🚫 **Sin cuenta** — nada de registros, correos ni contraseñas. Abres, buscas y escuchas.
+- 📢 **Sin anuncios** — ninguno. La música se escucha, no se interrumpe.
+- 📱 **App de Android oficial** — con controles de música en la barra de notificaciones y en la pantalla de bloqueo. Si pasas de la app a la web o de la web a la app, la canción sigue exactamente donde la dejaste.
+- ❤️ **Favoritos e historial** — guarda tus canciones favoritas, revisa lo que has escuchado y bórralo cuando quieras.
+- 📴 **Modo sin conexión** — si tu internet se cae, AuroraMusic avisa y se recupera sola al volver la señal.
+- 🔒 **Privado por diseño** — tu biblioteca, tus favoritos y tu historial se guardan en tu propio dispositivo, no en servidores ajenos.
+- 🌐 **También es una página web** — la misma música y la misma experiencia en cualquier navegador de PC o móvil, instalable como app.
 
-Get the app directly — one tap, no mirrors, no external sites:
+## 📲 Descargar la app de Android (APK)
 
 | | |
 | --- | --- |
-| 📦 **Package** | `com.aurora.music` |
-| 🏷️ **Version** | 1.0.0 |
-| 🤖 **Requires** | Android 7.0+ |
-| 💾 **Size** | ~102 MB |
-| 🔐 **Signature** | Signed release build |
+| 📱 Aplicación | **AuroraMusic** |
+| 🏷️ Versión | 1.0.0 |
+| 💾 Tamaño | ~102 MB |
+| 📦 Instalación | APK directa, sin Play Store |
 
-1. **[⬇️ Download the APK](https://github.com/DevAuroraX/Aurora-Music/releases/latest/download/AuroraMusic.apk)** — the download starts immediately
-2. **Open the downloaded file** from your notifications or the Files app
-3. If Android asks, **allow installs from your browser/Files app** (normal for direct APK installs)
-4. Tap **Install** — done. Enjoy Aurora Music with native media controls 🎶
+1. **[Descargar el APK](https://github.com/DevAuroraX/Aurora-Music/releases/latest/download/AuroraMusic.apk)** — la descarga empieza al instante.
+2. Abre el archivo descargado desde las notificaciones o desde tu gestor de archivos.
+3. Si Android lo pide, permite instalar apps de tu navegador o gestor de archivos (normal en instalaciones directas).
+4. Toca **Instalar** y listo 🎶
 
-> 💡 On iPhone, iPad or desktop? The full experience is also available on the web: **[music.aurorax.site](https://music.aurorax.site)**
+> ¿Tienes iPhone, iPad o PC? No necesitas instalar nada: abre directamente **[music.aurorax.site](https://music.aurorax.site)** en tu navegador.
 
-## 🌐 The Web App
+## 🔐 Autenticidad: firma oficial del APK
 
-Open **[music.aurorax.site](https://music.aurorax.site)** in any browser — nothing to install.
-You can also add it to your home screen as a PWA for an app-like experience.
+Todo APK oficial de AuroraMusic está firmado con la clave del proyecto (**DevAurora X · Aliinax**). La huella de esa firma es:
 
-This repository contains the complete source of the web app in [`web/`](web/):
+```text
+SHA-256 de la firma:
+88:B9:C0:A9:49:2F:29:E8:9F:34:F2:9E:59:54:4B:35:9B:C2:82:36:31:03:6E:47:A9:36:B0:66:44:28:FC:C0
+```
 
-- `web/aurora-music-worker.js` — the entire web app (HTML + CSS + JS) as a single Cloudflare Worker
-- [`web/DEPLOY.md`](web/DEPLOY.md) — how to run your own instance
+Y el archivo `AuroraMusic.apk` oficial completo (v1.0.0):
 
-## 📸 Screenshots
+```text
+SHA-256 del archivo:
+e4103b5e8388086eff7030d81103dcc7bc1b859e7e2c97e0fef05a6959de8c46
+```
 
-| Web — Home (desktop) | Web — Home (mobile) | Get the app page |
+La huella de la firma es siempre la misma para todas las versiones; la del archivo puede cambiar con cada versión nueva.
+
+Las únicas fuentes oficiales de descarga son:
+
+- **[music.aurorax.site](https://music.aurorax.site)** — botón "Descargar APK" dentro de la propia web
+- **[github.com/DevAuroraX/Aurora-Music/releases/latest](https://github.com/DevAuroraX/Aurora-Music/releases/latest)** — este repositorio
+
+Si descargas un "AuroraMusic" en otro lado y la firma o el archivo no coinciden con estas huellas, no es nuestro: no lo instales y avísanos por Discord.
+
+## 🌎 Idiomas
+
+La web y la app están traducidas por completo a **12 idiomas**: Español, English, Português, Français, Deutsch, Italiano, Русский, 日本語, 한국어, 中文, العربية, हिन्दी.
+
+## 💬 Nuestro grupo
+
+AuroraMusic — la web y la app — es un proyecto de nuestro grupo, y este repositorio es su casa oficial. Novedades, peticiones de canciones y soporte directo:
+
+**[Entrar al Discord](https://discord.gg/pU9ckzwsut)**
+
+## ❓ Preguntas frecuentes
+
+- **¿AuroraMusic es gratis?** Sí, completamente: sin cuenta, sin anuncios y sin límites.
+- **¿Necesito registrarme para escuchar música?** No. Entras, buscas la canción y la escuchas.
+- **¿Dónde descargo el APK oficial de AuroraMusic?** Desde la propia web ([music.aurorax.site](https://music.aurorax.site)) o desde las [releases de este repositorio](https://github.com/DevAuroraX/Aurora-Music/releases/latest). La firma oficial está publicada más arriba para que compruebes cualquier archivo.
+- **¿Funciona en iPhone, iPad o PC?** Sí: [music.aurorax.site](https://music.aurorax.site) funciona en cualquier navegador moderno.
+- **¿Es una copia de otra app?** No: AuroraMusic es un proyecto propio de nuestro grupo, con web y app propias. Cualquier "AuroraMusic" que no salga de las fuentes oficiales de arriba no es nuestro.
+
+## 📸 Capturas
+
+| Web en escritorio | Web en móvil | Obtener la app |
 | :---: | :---: | :---: |
-| <img src="screenshots/desktop-home.png" width="280" alt="Desktop home" /> | <img src="screenshots/mobile-home.png" width="180" alt="Mobile home" /> | <img src="screenshots/mobile-app-page.png" width="180" alt="App page" /> |
+| <img src="screenshots/desktop-home.png" width="280" alt="AuroraMusic en escritorio" /> | <img src="screenshots/mobile-home.png" width="180" alt="AuroraMusic en móvil" /> | <img src="screenshots/mobile-app-page.png" width="180" alt="Página para obtener la app" /> |
 
-| Now Playing | Settings & languages |
+| Reproduciendo | Ajustes e idiomas |
 | :---: | :---: |
-| <img src="screenshots/mobile-player.png" width="180" alt="Now playing" /> | <img src="screenshots/desktop-settings.png" width="280" alt="Settings" /> |
-
-
-## 🔗 Links
-
-- 🌐 **Web app:** <https://music.aurorax.site>
-- ⬇️ **Android APK:** <https://github.com/DevAuroraX/Aurora-Music/releases/latest>
-- 💬 **Discord community:** <https://discord.gg/pU9ckzwsut>
+| <img src="screenshots/mobile-player.png" width="180" alt="Reproductor de música" /> | <img src="screenshots/desktop-settings.png" width="280" alt="Ajustes e idiomas" /> |
 
 ---
 
 <div align="center">
 
-**Made with 🎶 by [DevAuroraX](https://github.com/DevAuroraX)**
+Hecho con 🎶 por **[DevAuroraX](https://github.com/DevAuroraX)**
 
-<sub>© Aurora Music — All rights reserved.</sub>
+<sub>© AuroraMusic — web y app de música de nuestro grupo.</sub>
 
 </div>
