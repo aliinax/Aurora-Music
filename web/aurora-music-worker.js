@@ -7602,10 +7602,23 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       return !audio.paused && !audio.ended && audio.readyState >= 2;
     }
 
-    function startSmartAudioLoad(track) {
+    // v2.6 — tope de paciencia: si a los 45s nada esta sonando (servidor
+    // lento + puente todavia resolviendo), el iframe toma el mando. El
+    // puente sigue su curso: lo que resuelva se cachea en la VM para todos.
+    let smartIframeDeadlineMs = 45000;
+
+    async function startSmartAudioLoad(track) {
       const vid = track.id;
       const myToken = ++smartLoadToken;
       smartBridgePendingVid = vid;
+      setTimeout(() => {
+        if (myToken !== smartLoadToken) return;      // la cancion ya cambio
+        if (isYtFallback) return;                    // el iframe ya esta activo
+        if (!isPlaying) return;                      // el usuario pauso
+        if (!currentTrack || currentTrack.id !== vid) return; // track obsoleto
+        if (serverAudioReady()) return;              // el servidor ya esta sonando
+        playViaYouTubeIframe(vid);
+      }, smartIframeDeadlineMs);
 
       // 0) URL ya resuelta por este navegador en esta sesion: replay al instante
       const cached = gvStreamCache.get(vid);
@@ -7630,7 +7643,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           if (err.name === 'AbortError') return;
           // la via del servidor fallo al arrancar: el puente (si puede) o
           // el iframe se encargan; si el puente ya no esta pendiente, iframe
-          if (myToken === smartLoadToken && smartBridgePendingVid !== vid) {
+          if (myToken === smartLoadToken && !isYtFallback && smartBridgePendingVid !== vid) {
             playViaYouTubeIframe(vid);
           }
         });
@@ -7642,15 +7655,17 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         if (smartBridgePendingVid === vid) smartBridgePendingVid = null;
         if (res && res.u) {
           gvStreamCache.set(vid, res);
-          if (!serverAudioReady()) {
-            // el servidor no llego (o fallo): reproducir directo con la IP
-            // de este navegador y cachear en la VM para todos
+          // v2.6 — cachear en la VM SIEMPRE (ayuda a todos los usuarios),
+          // incluso si aqui ya estamos escuchando por el iframe
+          fetch('/api/bridge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vid: vid, u: res.u, ua: res.ua })
+          }).catch(() => {});
+          if (!serverAudioReady() && !isYtFallback) {
+            // el servidor no llego (o fallo) y el iframe no esta sonando:
+            // reproducir directo con la IP de este navegador
             switchToGvStream(res.u, vid);
-            fetch('/api/bridge', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ vid: vid, u: res.u, ua: res.ua })
-            }).catch(() => {});
           }
         } else if (!serverAudioReady() && !isYtFallback) {
           // puente fallido y servidor sin audio: iframe de YouTube
@@ -7745,7 +7760,36 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       }
     }
 
+    // AURORA-MUSIC v2.6 — anti doble-audio: NUNCA dos motores sonando.
+    // Mata la via del servidor (stream pendiente incluido): si no, cuando el
+    // stream "despierta" minutos despues suena junto con el iframe, y al
+    // pausar solo se pausa uno de los dos (la doble queda "debajo").
+    function stopServerAudio() {
+      try { audio.pause(); } catch (_) {}
+      try { audio.removeAttribute('src'); } catch (_) {}
+      try { audio.load(); } catch (_) {}
+    }
+
+    // v2.6 — videos con iframe ya fallido (embed deshabilitado, red, etc.)
+    const iframeFailedVids = new Set();
+    // v2.6 — video que el iframe esta reproduciendo ahora
+    let ytActiveVid = null;
+
     function playViaYouTubeIframe(videoId) {
+      // v2.6 — si el iframe ya esta sonando ESTE video, no re-arrancarlo
+      // (un loadVideoById reiniciaria la cancion desde cero)
+      if (isYtFallback && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+        try {
+          const st = ytPlayer.getPlayerState();
+          if ((st === 1 || st === 3) && typeof ytPlayer.getVideoUrl === 'function' &&
+              String(ytPlayer.getVideoUrl()).indexOf(videoId) !== -1) return;
+        } catch (_) {}
+      }
+      // v2.6 — a este video el iframe ya le fallo una vez: no reintentarlo
+      // (y NO matar la via del servidor, que sigue siendo la ultima carta)
+      if (iframeFailedVids.has(videoId)) return;
+      stopServerAudio();
+      ytActiveVid = videoId;
       isYtFallback = true;
       if (!ytPlayer) {
         if (window.YT && window.YT.Player) {
@@ -7784,6 +7828,23 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             updatePlayIcons(true);
             startYtTimeTracker();
           },
+          // v2.6 — el iframe fallo (embed deshabilitado, red, etc.):
+          // devolver el control a la via servidor/puente con UN reintento
+          onError: (e) => {
+            try {
+              if (isYtFallback && ytActiveVid) {
+                iframeFailedVids.add(ytActiveVid);
+                if (iframeFailedVids.size > 50) iframeFailedVids.clear();
+                isYtFallback = false;
+                isPlaying = false;
+                updatePlayIcons(false);
+                stopYtTimeTracker();
+                if (currentTrack && currentTrack.id === ytActiveVid && !serverAudioReady()) {
+                  startSmartAudioLoad(currentTrack);
+                }
+              }
+            } catch (_) {}
+          },
           onStateChange: (e) => {
             if (e.data === YT.PlayerState.PLAYING) {
               isPlaying = true;
@@ -7820,6 +7881,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       if (isYtFallback && ytPlayer) {
         if (isPlaying) {
           try { ytPlayer.pauseVideo(); } catch (_) {}
+          // v2.6 — defensa: si quedara audio del servidor sonando "debajo", matarlo
+          try { if (!audio.paused) audio.pause(); } catch (_) {}
           isPlaying = false;
           updatePlayIcons(false);
           stopYtTimeTracker();
@@ -7846,6 +7909,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         }
       } else {
         audio.pause();
+        // v2.6 — defensa: detener el iframe si por cualquier ruta quedo vivo
+        try { if (ytPlayer && typeof ytPlayer.stopVideo === 'function') ytPlayer.stopVideo(); } catch (_) {}
         isPlaying = false;
         updatePlayIcons(false);
       }
@@ -7926,6 +7991,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
 
     // Audio element event listeners
     audio.addEventListener('play', () => {
+      if (isYtFallback) return; // v2.6 — el motor activo es el iframe: ignorar al otro
       isPlaying = true;
       updatePlayIcons(true);
       syncMediaPositionState();
@@ -7937,11 +8003,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     });
 
     audio.addEventListener('playing', () => {
+      if (isYtFallback) return; // v2.6
       isPlaying = true;
       updatePlayIcons(true);
     });
 
     audio.addEventListener('pause', () => {
+      if (isYtFallback) return; // v2.6 — no pintar "pausado" si el iframe esta sonando
       isPlaying = false;
       updatePlayIcons(false);
     });
