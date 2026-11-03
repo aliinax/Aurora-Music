@@ -102,7 +102,7 @@ AuroraMusic — the web app and the Android app — is a project by our group, a
 
 <div align="center">
 
-Made with 🎶 by **[DevAuroraX](https://github.com/DevAuroraX)**
+Made with 🎶 by **[aliinax](https://github.com/aliinax)**
 
 <sub>© AuroraMusic — our group's music web & app.</sub>
 
