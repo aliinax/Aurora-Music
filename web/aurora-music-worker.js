@@ -2737,7 +2737,11 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       gap: 10px;
       margin-top: 4px;
     }
-    @media (max-width: 520px) {
+    /* AURORA-MUSIC v2.8 — FIX: esta media query (max-width:520px) quedo abierta
+       sin "}" y tragaba TODO el CSS posterior en anchos >520px (dropdowns de
+       ajustes, /terms, toasts, overlay offline y la barra movil Home/Explore/
+       Library/Settings que aparecia "blanca" abajo a la izquierda al activar
+       modo PC en el navegador del celular). Reglas de abajo: top-level. */
     /* Compact YouTube Music Style Dropdowns */
     .ytm-dropdown-wrapper {
       position: relative;
