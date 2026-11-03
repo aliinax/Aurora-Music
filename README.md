@@ -7,7 +7,7 @@
 **Sonic Stream Engine — free music streaming for the web & Android.**
 
 Search and stream millions of tracks with a YouTube Music–powered engine,
-high-fidelity audio and a clean, YouTube Music–inspired interface — in 12 languages.
+high-fidelity audio and a clean, - in 12 languages.
 
 [![Release](https://img.shields.io/github/v/release/DevAuroraX/Aurora-Music?style=flat-square&color=38bdf8&label=latest%20release)](https://github.com/DevAuroraX/Aurora-Music/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Web%20%2B%20Android-3ddc84?style=flat-square)](https://music.aurorax.site)
