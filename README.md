@@ -6,7 +6,7 @@
 
 **Sonic Stream Engine — free music streaming for the web & Android.**
 
-Search and stream millions of tracks with a DebAurora Music–powered engine,
+Search and stream millions of tracks with a DevAurora X Music–powered engine,
 high-fidelity audio and a clean, - in 12 languages.
 
 [![Release](https://img.shields.io/github/v/release/DevAuroraX/Aurora-Music?style=flat-square&color=38bdf8&label=latest%20release)](https://github.com/DevAuroraX/Aurora-Music/releases/latest)
@@ -28,7 +28,7 @@ high-fidelity audio and a clean, - in 12 languages.
 
 ## ✨ Features
 
-- 🔎 **Powerful search engine** — finds songs, artists and albums through the YouTube Music engine
+- 🔎 **Powerful search engine** — finds songs, artists and albums through the DevAurora X Music engine
 - 🎧 **High-fidelity streaming** — adaptive audio up to 256 kbps AAC and Lossless FLAC
 - 🌍 **12 languages** — instant switching, no reload: English, Español, Português, Français, Deutsch, Italiano, Русский, 日本語， 한국어, 中文， العربية, हिन्दी
 - ❤️ **Favorites & custom albums** — build your own collections, all stored privately on your device (IndexedDB)
@@ -36,7 +36,6 @@ high-fidelity audio and a clean, - in 12 languages.
 - 🔔 **System media controls** — play/pause from the notification, lock screen or headphones (Media Session API)
 - 📴 **Offline mode, YouTube Music style** — friendly skeletons and auto-recovery when the connection drops
 - 📱 **Native Android app** — the full web experience with native media controls and downloads via the `AndroidBridge` interface
-- 🎨 **Beautiful dark aurora UI** — YouTube Music–inspired layout, fully responsive, installable as a PWA
 
 ## 📱 Install on Android
 
@@ -77,10 +76,6 @@ This repository contains the complete source of the web app in [`web/`](web/):
 | :---: | :---: |
 | <img src="screenshots/mobile-player.png" width="180" alt="Now playing" /> | <img src="screenshots/desktop-settings.png" width="280" alt="Settings" /> |
 
-## 🛠 Tech Stack
-
-- **Web:** Cloudflare Workers · D1 · R2 · DevAurora Music engine · IndexedDB · Media Session API · PWA
-- **Android:** Kotlin · Jetpack Compose · WebView + `AndroidBridge` JavaScript interface · Signed release build
 
 ## 🔗 Links
 
