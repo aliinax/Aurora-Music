@@ -1,0 +1,15 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+
+# Node (only used for local tooling, not required to run the app)
+node_modules/
+
+# Never commit local secrets
+.env
+.env.*
+*.key
+*.pem
