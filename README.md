@@ -79,7 +79,7 @@ This repository contains the complete source of the web app in [`web/`](web/):
 
 ## 🛠 Tech Stack
 
-- **Web:** Cloudflare Workers · D1 · R2 · YouTube Music engine · IndexedDB · Media Session API · PWA
+- **Web:** Cloudflare Workers · D1 · R2 · DevAurora Music engine · IndexedDB · Media Session API · PWA
 - **Android:** Kotlin · Jetpack Compose · WebView + `AndroidBridge` JavaScript interface · Signed release build
 
 ## 🔗 Links
