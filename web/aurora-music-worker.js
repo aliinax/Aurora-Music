@@ -1137,12 +1137,69 @@ export default {
 
     if (path === "/aurora.apk" || path === "/AuroraMusic.apk" || path === "/app.apk" || path === "/download/app" || path === "/download/apk") {
       if (!env || !env.MP3) return new Response("R2 not configured", { status: 500 });
-      const obj = await env.MP3.get("AuroraMusic.apk");
+      const APK_KEY = "AuroraMusic.apk";
+      // HEAD: solo metadatos, sin leer el objeto
+      if (method === "HEAD") {
+        const h = await env.MP3.head(APK_KEY);
+        if (!h) return new Response("APK not found", { status: 404 });
+        const hh = new Headers();
+        hh.set("Content-Type", "application/vnd.android.package-archive");
+        hh.set("Content-Disposition", 'attachment; filename="AuroraMusic.apk"');
+        hh.set("Content-Length", h.size.toString());
+        hh.set("Accept-Ranges", "bytes");
+        hh.set("Cache-Control", "public, max-age=3600");
+        hh.set("Access-Control-Allow-Origin", "*");
+        return new Response(null, { status: 200, headers: hh });
+      }
+      // Range: descargas reanudables (la APK es grande; en movil corta y
+      // reanuda en vez de empezar de cero). Rango simple unico; multi-rango
+      // o rango raro -> se sirve el archivo completo.
+      const rangeHeader = request.headers.get("range");
+      let rangeMatch = null;
+      if (rangeHeader) {
+        const rm = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+        if (rm && (rm[1] !== "" || rm[2] !== "")) rangeMatch = rm;
+      }
+      if (rangeMatch) {
+        try {
+          const h = await env.MP3.head(APK_KEY);
+          if (!h) return new Response("APK not found", { status: 404 });
+          const totalSize = h.size;
+          let rangeStart = 0, rangeLen = 0;
+          if (rangeMatch[1] === "") {
+            const n = parseInt(rangeMatch[2], 10);
+            if (!Number.isFinite(n) || n <= 0) return new Response("Range not satisfiable", { status: 416 });
+            rangeLen = Math.min(n, totalSize);
+            rangeStart = totalSize - rangeLen;
+          } else {
+            const start = parseInt(rangeMatch[1], 10);
+            const endIncl = rangeMatch[2] === "" ? totalSize - 1 : parseInt(rangeMatch[2], 10);
+            if (!Number.isFinite(start) || start < 0 || start >= totalSize) return new Response("Range not satisfiable", { status: 416 });
+            rangeLen = Math.min(endIncl, totalSize - 1) - start + 1;
+            if (rangeLen <= 0) return new Response("Range not satisfiable", { status: 416 });
+            rangeStart = start;
+          }
+          const robj = await env.MP3.get(APK_KEY, { range: { offset: rangeStart, length: rangeLen } });
+          if (robj) {
+            const rheaders = new Headers();
+            rheaders.set("Content-Type", "application/vnd.android.package-archive");
+            rheaders.set("Content-Disposition", 'attachment; filename="AuroraMusic.apk"');
+            rheaders.set("Content-Length", rangeLen.toString());
+            rheaders.set("Content-Range", "bytes " + rangeStart + "-" + (rangeStart + rangeLen - 1) + "/" + totalSize);
+            rheaders.set("Accept-Ranges", "bytes");
+            rheaders.set("Cache-Control", "public, max-age=3600");
+            rheaders.set("Access-Control-Allow-Origin", "*");
+            return new Response(robj.body, { status: 206, headers: rheaders });
+          }
+        } catch (_) { /* rango rechazado por R2: servir completo abajo */ }
+      }
+      const obj = await env.MP3.get(APK_KEY);
       if (!obj) return new Response("APK not found", { status: 404 });
       const headers = new Headers();
       headers.set("Content-Type", "application/vnd.android.package-archive");
       headers.set("Content-Disposition", 'attachment; filename="AuroraMusic.apk"');
       headers.set("Content-Length", obj.size.toString());
+      headers.set("Accept-Ranges", "bytes");
       headers.set("Cache-Control", "public, max-age=3600");
       headers.set("Access-Control-Allow-Origin", "*");
       return new Response(obj.body, { status: 200, headers });
@@ -1167,6 +1224,21 @@ export default {
       } catch (_) {
         return new Response("Thumbnail fetch failed", { status: 502, headers: SECURITY_HEADERS });
       }
+    }
+
+    if (path === "/api/health" && (method === "GET" || method === "HEAD")) {
+      return jsonResponse({ ok: true, service: "aurora-music", ts: Date.now() });
+    }
+
+    if (path === "/sw.js" && method === "GET") {
+      return new Response(AURORA_SW_JS, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "no-cache, max-age=0, must-revalidate",
+          "Service-Worker-Allowed": "/",
+        },
+      });
     }
 
     if (path === "/manifest.json" && method === "GET") {
@@ -1213,6 +1285,79 @@ export default {
 // ------------------------------------------------------------
 // Brand Assets & Vector Icons
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// Service Worker: shell offline + auto-recuperacion
+// Red-first en navegaciones: si no hay red sirve el shell cacheado
+// (la app abre offline y muestra su propio aviso bonito).
+// API (incluido /api/stream) NUNCA se cachea.
+// ------------------------------------------------------------
+const AURORA_SW_JS = `
+// Aurora Music Service Worker
+var SHELL_CACHE = 'aurora-shell-v1';
+
+self.addEventListener('install', function (e) {
+  e.waitUntil(
+    caches.open(SHELL_CACHE).then(function (c) { return c.add('/').catch(function () {}); })
+      .then(function () { return self.skipWaiting(); })
+  );
+});
+
+self.addEventListener('activate', function (e) {
+  e.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.map(function (k) {
+        if (k !== SHELL_CACHE) return caches.delete(k);
+      }));
+    }).then(function () { return self.clients.claim(); })
+  );
+});
+
+self.addEventListener('fetch', function (e) {
+  var req = e.request;
+  if (req.method !== 'GET') return;
+  var url;
+  try { url = new URL(req.url); } catch (_) { return; }
+  if (url.origin !== self.location.origin) return; // artwork/fonts externos: fuera
+  if (url.pathname.indexOf('/api/') === 0) return; // APIs: siempre red
+
+  if (req.mode === 'navigate') {
+    // Red primero; sin red -> shell cacheado (adios "web sin conexion")
+    e.respondWith(
+      fetch(req).then(function (res) {
+        try {
+          var clone = res.clone();
+          caches.open(SHELL_CACHE).then(function (c) { c.put('/', clone); }).catch(function () {});
+        } catch (_) {}
+        return res;
+      }).catch(function () {
+        return caches.open(SHELL_CACHE).then(function (c) {
+          return c.match('/', { ignoreSearch: true, ignoreVary: true });
+        }).then(function (shell) {
+          if (shell) return shell;
+          return new Response('offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
+        });
+      })
+    );
+    return;
+  }
+
+  // Assets propios (icon.svg, manifest.json): cache-first con revalidacion
+  e.respondWith(
+    caches.open(SHELL_CACHE).then(function (c) {
+      return c.match(req, { ignoreSearch: true }).then(function (hit) {
+        var net = fetch(req).then(function (res) {
+          if (res && res.ok) {
+            try { var clone = res.clone(); c.put(req, clone).catch(function () {}); } catch (_) {}
+          }
+          return res;
+        }).catch(function () { return hit || Response.error(); });
+        return hit || net;
+      });
+    })
+  );
+});
+`;
+
 const WOLF_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
   <defs>
     <linearGradient id="auroraGlow" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -2592,12 +2737,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       gap: 10px;
       margin-top: 4px;
     }
-    /* Compact YouTube Music Style Dropdowns
-       (AURORA-MUSIC v2.3: este bloque estaba envuelto en un @media (max-width: 520px)
-       que NUNCA cerro, tragandose todo el CSS siguiente — pagina /terms, toast,
-       barra movil, queries responsive, banner offline, skeletons y la pagina /app —
-       dejandolos sin estilo en anchos > 520px. El wrapper se elimina: los estilos
-       del dropdown son globales por diseno.) */
+    @media (max-width: 520px) {
+    /* Compact YouTube Music Style Dropdowns */
     .ytm-dropdown-wrapper {
       position: relative;
       width: 100%;
@@ -3544,107 +3685,140 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       text-transform: uppercase;
     }
     .ytm-text-btn:hover { background: rgba(62, 166, 255, 0.1); }
-
-    /* ===== Modo offline estilo YT Music: skeletons + banner ===== */
-    .aurora-skel {
-      position: relative;
-      overflow: hidden;
-      background: rgba(255, 255, 255, 0.055);
-      border-radius: 6px;
-    }
-    .aurora-skel::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      transform: translateX(-100%);
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.075), transparent);
-      animation: auroraSkel 1.6s infinite;
-    }
-    @keyframes auroraSkel {
-      100% { transform: translateX(100%); }
-    }
-    .aurora-skel-card {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      background: rgba(255, 255, 255, 0.025);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 10px;
-      padding: 6px 10px;
-      min-height: 60px;
-      pointer-events: none;
-      user-select: none;
-    }
-    .aurora-skel-thumb { width: 48px; height: 48px; flex-shrink: 0; border-radius: 6px; }
-    .aurora-skel-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-    .aurora-skel-line { height: 12px; width: 75%; }
-    .aurora-skel-line-sm { height: 9px; width: 45%; }
-    .aurora-skel-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 8px 10px;
-      pointer-events: none;
-      user-select: none;
-    }
-    .aurora-offline-banner {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 9px;
-      padding: 8px 14px;
-      background: rgba(8, 10, 16, 0.97);
-      border-bottom: 1px solid rgba(248, 113, 113, 0.32);
-      color: #f8fafc;
-      font-size: 13px;
-      font-weight: 600;
-      z-index: 99998;
-      transform: translateY(-110%);
-      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-      -webkit-backdrop-filter: blur(8px);
-      backdrop-filter: blur(8px);
-    }
-    .aurora-offline-banner.visible { transform: translateY(0); }
-    .aurora-offline-banner .sk-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #f87171;
-      animation: auroraOfflinePulse 1.4s ease-in-out infinite;
-      flex-shrink: 0;
-    }
-    @keyframes auroraOfflinePulse {
-      0%, 100% { opacity: 0.35; }
-      50% { opacity: 1; }
-    }
-    .aurora-offline-banner button {
-      background: rgba(248, 113, 113, 0.12);
-      border: 1px solid rgba(248, 113, 113, 0.3);
-      color: #fca5a5;
-      font-size: 12px;
-      font-weight: 700;
-      border-radius: 9999px;
-      padding: 4px 12px;
-      cursor: pointer;
-    }
-    .aurora-offline-banner button:hover { background: rgba(248, 113, 113, 0.2); }
+    /* ===== Offline mode: overlay boot + banner mid-session (YT Music style) ===== */
+    #auroraOfflineOverlay { position: fixed; inset: 0; z-index: 2147483000; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: rgba(3,3,3,0.97); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); text-align: center; padding: 32px; }
+    #auroraOfflineOverlay.visible { display: flex; animation: auroraFadeIn .35s ease; }
+    .aurora-offline-glow { width: 92px; height: 92px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle, rgba(56,189,248,0.16) 0%, rgba(3,3,3,0) 70%); border: 1px solid rgba(56,189,248,0.35); }
+    .aurora-offline-glow svg { width: 40px; height: 40px; color: var(--primary); }
+    .aurora-offline-title { font-size: 20px; font-weight: 700; letter-spacing: .3px; color: var(--text); }
+    .aurora-offline-sub { font-size: 13.5px; color: var(--text-dim); max-width: 280px; line-height: 1.45; }
+    .aurora-spin-ring { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid rgba(56,189,248,0.18); border-top-color: var(--primary); animation: auroraSpin 0.9s linear infinite; }
+    .aurora-spin-ring-sm { width: 12px; height: 12px; border-width: 2px; }
+    @keyframes auroraSpin { to { transform: rotate(360deg); } }
+    @keyframes auroraFadeIn { from { opacity: 0; } to { opacity: 1; } }
+    #auroraOfflineBanner { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--player-h) + 14px); z-index: 2147483000; display: none; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: rgba(15,15,15,0.94); border: 1px solid rgba(56,189,248,0.35); color: var(--text); font-size: 13px; font-weight: 500; box-shadow: 0 8px 24px rgba(0,0,0,0.55); pointer-events: none; }
+    #auroraOfflineBanner.visible { display: flex; animation: auroraFadeIn .3s ease; }
+    #auroraOfflineBanner svg { width: 16px; height: 16px; color: var(--primary); }
   </style>
 </head>
 <body>
   <div id="ytBridgeBox" style="position:fixed;bottom:-9999px;left:-9999px;width:1px;height:1px;opacity:0.01;pointer-events:none;"><div id="ytPlayer"></div></div>
 
-  <!-- Offline status banner (YT Music style, NO bloquea la UI) -->
-  <div class="aurora-offline-banner" id="offlineBanner" role="status" aria-live="polite">
-    <span class="sk-dot"></span>
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-    <span data-i18n="offlineBanner">Sin conexi\u00f3n a internet</span>
-    <button type="button" onclick="manualRetryOnline()" data-i18n="offlineRetryBtn">Reintentar</button>
+  <!-- ===== Modo offline (estilo YT Music): boot sin conexion + auto-recuperacion ===== -->
+  <div id="auroraOfflineOverlay">
+    <svg width="46" height="46" viewBox="0 0 100 100" fill="none" style="opacity:.9;">
+      <circle cx="50" cy="50" r="46" fill="#0d111a" stroke="#38bdf8" stroke-width="2"/>
+      <path d="M50 16 L65 34 L78 28 L72 45 L82 54 L68 60 L62 76 L50 67 L38 76 L32 60 L18 54 L28 45 L22 28 L35 34 Z" fill="url(#auroraGradOff)"/>
+      <defs>
+        <linearGradient id="auroraGradOff" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#818cf8"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div class="aurora-offline-glow">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.78A4 4 0 0 1 19 14"/><path d="m5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+    </div>
+    <div class="aurora-offline-title" data-i18n="offline">Sin conexi\u00f3n</div>
+    <div class="aurora-spin-ring"></div>
+    <div class="aurora-offline-sub" data-i18n="reconnecting">Reconectando autom\u00e1ticamente...</div>
   </div>
+  <div id="auroraOfflineBanner">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.78A4 4 0 0 1 19 14"/><path d="m5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+    <span data-i18n="offline">Sin conexi\u00f3n</span>
+    <span class="aurora-spin-ring aurora-spin-ring-sm"></span>
+  </div>
+  <script>
+  /* Aurora Offline Controller: registra el Service Worker (la app abre sin
+     conexion en vez de la pagina fea del WebView), muestra el overlay de
+     boot o el banner de microcortes (tolerancia 4s) y al volver la red
+     recarga y carga todo. Solo consulta /api/health. */
+  (function () {
+    'use strict';
+    var OV = 'auroraOfflineOverlay';
+    var BN = 'auroraOfflineBanner';
+    var st = {
+      dataReady: false, shown: false, mode: '', everShown: false,
+      fails: 0, interval: null, tolerate: null, reloading: false
+    };
+    function setVisible(id, on) {
+      var e = document.getElementById(id);
+      if (e) { if (on) { e.classList.add('visible'); } else { e.classList.remove('visible'); } }
+    }
+    function show(mode) {
+      st.shown = true; st.everShown = true; st.mode = mode;
+      setVisible(OV, mode === 'overlay');
+      setVisible(BN, mode === 'banner');
+      if (!st.interval) { st.interval = setInterval(probe, 3000); }
+    }
+    function hide() {
+      st.shown = false; st.mode = '';
+      setVisible(OV, false);
+      setVisible(BN, false);
+      if (st.interval) { clearInterval(st.interval); st.interval = null; }
+      if (st.tolerate) { clearTimeout(st.tolerate); st.tolerate = null; }
+    }
+    function tryReload() {
+      if (st.reloading) return;
+      try {
+        var last = parseInt(sessionStorage.getItem('auroraOfflineReloadTs') || '0', 10) || 0;
+        if (Date.now() - last < 20000) return;
+        sessionStorage.setItem('auroraOfflineReloadTs', String(Date.now()));
+      } catch (_) {}
+      st.reloading = true;
+      try { window.location.reload(); } catch (_) { st.reloading = false; }
+    }
+    function probe() {
+      fetch('/api/health?_=' + Date.now(), { method: 'GET', cache: 'no-store' })
+        .then(function (r) {
+          if (r && r.ok) {
+            st.fails = 0;
+            if (st.shown) {
+              hide();
+              if (!st.dataReady && st.everShown) tryReload();
+            }
+          } else {
+            st.fails++;
+            if (st.fails >= 2 && !st.shown) show(st.dataReady ? 'banner' : 'overlay');
+          }
+        })
+        .catch(function () {
+          st.fails++;
+          if (st.fails >= 2 && !st.shown) show(st.dataReady ? 'banner' : 'overlay');
+        });
+    }
+    // Service Worker: shell offline (adios "web sin conexion" del WebView)
+    try {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+      }
+    } catch (_) {}
+    // Boot offline: overlay inmediato (la app queda "cargando" detras)
+    if (navigator.onLine === false) show(st.dataReady ? 'banner' : 'overlay');
+    window.addEventListener('offline', function () {
+      if (st.shown) return;
+      if (st.tolerate) clearTimeout(st.tolerate);
+      st.tolerate = setTimeout(function () {
+        st.tolerate = null;
+        if (!st.shown) show(st.dataReady ? 'banner' : 'overlay');
+      }, 4000);
+    });
+    window.addEventListener('online', function () {
+      if (st.tolerate) { clearTimeout(st.tolerate); st.tolerate = null; }
+      probe();
+    });
+    window.__auroraOffline = {
+      setDataReady: function () {
+        st.dataReady = true;
+        if (st.shown && st.mode === 'overlay') hide();
+      },
+      reportNetFail: function () {
+        if (!st.interval) { st.interval = setInterval(probe, 2500); }
+        probe();
+      }
+    };
+  })();
+  </script>
 
   <!-- Left Sidebar (Desktop YouTube Music) -->
   <aside class="ytm-sidebar">
@@ -3686,6 +3860,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="#3ddc84"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5S2 17.33 2 16.5v-7C2 8.67 2.67 8 3.5 8zm17 0c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-7c0-.83.67-1.5 1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.19-.51-.19-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.95 0-1.85.23-2.66.63L7.85.15c-.2-.19-.51-.19-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.74 3.23 6 5.08 6 7h12c0-1.92-.74-3.76-1.97-5.14zM9.5 5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zm5 0c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5z"/></svg>
         <span data-i18n="getAppNav">Obtener la app</span>
       </button>
+
+    
 
     <div class="ytm-nav-divider"></div>
 
@@ -4266,7 +4442,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           </button>
         </div>
       </div>
-
       <!-- AURORA-MUSIC v2.3 — Seccion: Obtener la app (solo navegadores) -->
       <div class="settings-card-section" id="getAppSection" style="padding:14px 16px;display:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -4516,6 +4691,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "Explorar",
         library: "Biblioteca",
         offline: "Sin conexi\u00f3n",
+        reconnecting: "Reconectando autom\u00e1ticamente...",
         settings: "Configuraci\u00f3n",
         searchPlaceholder: "Buscar canciones, artistas, g\u00e9neros o \u00e1lbumes...",
         quickPicks: "Vuelve a escuchar",
@@ -4626,10 +4802,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         discordNav: "Comunidad de Discord",
         discordSub: "Novedades, peticiones de canciones y soporte en el server oficial",
         discordJoinBtn: "Entrar al Discord",
-        offlineBanner: "Sin conexi\u00f3n a internet",
-        offlineRetryBtn: "Reintentar",
-        onlineBackToast: "Conexi\u00f3n restablecida",
-        offlinePlayToast: "Sin conexi\u00f3n \u2014 no se puede reproducir ahora",
         termsNav: "T\u00e9rminos y DMCA",
         back: "Volver",
         getAppNav: "Obtener la app",
@@ -4658,6 +4830,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "Explore",
         library: "Library",
         offline: "Offline",
+        reconnecting: "Reconnecting automatically...",
         settings: "Settings",
         searchPlaceholder: "Search songs, artists, genres or albums...",
         quickPicks: "Listen Again",
@@ -4765,10 +4938,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         discordNav: "Discord Community",
         discordSub: "News, song requests and support on the official server",
         discordJoinBtn: "Join Discord",
-        offlineBanner: "No internet connection",
-        offlineRetryBtn: "Retry",
-        onlineBackToast: "Back online",
-        offlinePlayToast: "No connection \u2014 can't play right now",
         termsNav: "Terms & DMCA",
         back: "Back",
         moodCurated: "Curated music for this moment",
@@ -4800,6 +4969,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "Explorar",
         library: "Biblioteca",
         offline: "Sem conex\u00e3o",
+        reconnecting: "Reconectando automaticamente...",
         settings: "Configura\u00e7\u00f5es",
         searchPlaceholder: "Pesquisar m\u00fasicas, artistas ou \u00e1lbuns...",
         quickPicks: "Ouvir novamente",
@@ -4909,6 +5079,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "Explorer",
         library: "Biblioth\u00e8que",
         offline: "Hors ligne",
+        reconnecting: "Reconnexion automatique...",
         settings: "Param\u00e8tres",
         searchPlaceholder: "Rechercher titres, artistes, albums...",
         quickPicks: "\u00c9couter \u00e0 nouveau",
@@ -5018,6 +5189,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "Entdecken",
         library: "Mediathek",
         offline: "Offline",
+        reconnecting: "Automatische Neuverbindung...",
         settings: "Einstellungen",
         searchPlaceholder: "Titel, K\u00fcnstler, Alben suchen...",
         quickPicks: "Wieder anh\u00f6ren",
@@ -5127,6 +5299,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "Esplora",
         library: "Raccolta",
         offline: "Non in linea",
+        reconnecting: "Riconnessione automatica...",
         settings: "Impostazioni",
         searchPlaceholder: "Cerca brani, artisti, album...",
         quickPicks: "Ascolta di nuovo",
@@ -5236,6 +5409,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "\u041e\u0431\u0437\u043e\u0440",
         library: "\u041c\u0435\u0434\u0438\u0430\u0442\u0435\u043a\u0430",
         offline: "\u041e\u0444\u043b\u0430\u0439\u043d",
+        reconnecting: "\u0410\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u043e\u0435 \u043f\u0435\u0440\u0435\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435...",
         settings: "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
         searchPlaceholder: "\u041f\u043e\u0438\u0441\u043a \u0442\u0440\u0435\u043a\u043e\u0432, \u0438\u0441\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u0435\u0439...",
         quickPicks: "\u041f\u043e\u0441\u043b\u0443\u0448\u0430\u0442\u044c \u0441\u043d\u043e\u0432\u0430",
@@ -5345,6 +5519,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "\u63a2\u7d22",
         library: "\u30e9\u30a4\u30d6\u30e9\u30ea",
         offline: "\u30aa\u30d5\u30e9\u30a4\u30f3",
+        reconnecting: "\u81ea\u52d5\u7684\u306b\u518d\u63a5\u7d9a\u3057\u3066\u3044\u307e\u3059...",
         settings: "\u8a2d\u5b9a",
         searchPlaceholder: "\u66f2\u3001\u30a2\u30fc\u30c6\u30a3\u30b9\u30c8\u3001\u30a2\u30eb\u30d0\u30e0\u3092\u691c\u7d22...",
         quickPicks: "\u3082\u3046\u4e00\u5ea6\u8074\u304f",
@@ -5454,6 +5629,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "\ud0d0\uc0c9",
         library: "\ubcf4\uad00\ud568",
         offline: "\uc624\ud504\ub77c\uc778",
+        reconnecting: "\uc790\ub3d9\uc73c\ub85c \ub2e4\uc2dc \uc5f0\uacb0\ud558\ub294 \uc911...",
         settings: "\uc124\uc815",
         searchPlaceholder: "\ub178\ub798, \uc544\ud2f0\uc2a4\ud2b8, \uc568\ubc94 \uac80\uc0c9...",
         quickPicks: "\ub2e4\uc2dc \ub4e3\uae30",
@@ -5563,6 +5739,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "\u63a2\u7d22",
         library: "\u97f3\u4e50\u5e93",
         offline: "\u79bb\u7ebf",
+        reconnecting: "\u6b63\u5728\u81ea\u52a8\u91cd\u65b0\u8fde\u63a5...",
         settings: "\u8bbe\u7f6e",
         searchPlaceholder: "\u641c\u7d22\u6b4c\u66f2\u3001\u827a\u4eba\u3001\u4e13\u8f91...",
         quickPicks: "\u518d\u6b21\u8046\u542c",
@@ -5672,6 +5849,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "\u0627\u0633\u062a\u0643\u0634\u0627\u0641",
         library: "\u0627\u0644\u0645\u0643\u062a\u0628\u0629",
         offline: "\u062f\u0648\u0646 \u0627\u062a\u0635\u0627\u0644",
+        reconnecting: "\u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u0627\u062a\u0635\u0627\u0644 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627...",
         settings: "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
         searchPlaceholder: "\u0627\u0628\u062d\u062b \u0639\u0646 \u0623\u063a\u0627\u0646\u064a \u0623\u0648 \u0641\u0646\u0627\u0646\u064a\u0646...",
         quickPicks: "\u0627\u0633\u062a\u0645\u0639 \u0645\u062c\u062f\u062f\u0627\u064b",
@@ -5781,6 +5959,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         explore: "\u090f\u0915\u094d\u0938\u092a\u094d\u0932\u094b\u0930",
         library: "\u0932\u093e\u0907\u092c\u094d\u0930\u0947\u0930\u0940",
         offline: "\u0911\u092b\u0932\u093e\u0907\u0928",
+        reconnecting: "\u0938\u094d\u0935\u0924\u0903 \u092a\u0941\u0928\u0903 \u0915\u0928\u0947\u0915\u094d\u091f \u0939\u094b \u0930\u0939\u093e \u0939\u0948...",
         settings: "\u0938\u0947\u091f\u093f\u0902\u0917",
         searchPlaceholder: "\u0917\u093e\u0928\u0947, \u0915\u0932\u093e\u0915\u093e\u0930 \u0916\u094b\u091c\u0947\u0902...",
         quickPicks: "\u092b\u093f\u0930 \u0938\u0941\u0928\u0947\u0902",
@@ -6478,23 +6657,18 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       if (resultsBox) resultsBox.style.display = 'block';
 
       if (list) {
-        if (offlineActive) {
-          renderSearchSkeletons(); // sin red: "como si cargara", estilo YT Music
-        } else {
-          list.innerHTML = \`
+        list.innerHTML = \`
           <div style="padding:40px;text-align:center;color:var(--text-dim);">
             <div class="spinner" style="width:32px;height:32px;margin:0 auto 12px auto;border-width:3px;"></div>
             <div style="font-size:14px;">\${t('searchPlaceholder')}</div>
           </div>
         \`;
-        }
       }
 
       try {
         const res = await fetch('/api/search?q=' + encodeURIComponent(clean));
         if (!res.ok) throw new Error('Search failed: ' + res.status);
         const data = await res.json();
-        if (offlineActive) exitOfflineMode(true); // la red volvio: recuperarse
 
         const songs = data.results || [];
         const albums = data.albums || [];
@@ -6516,10 +6690,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         renderSearchAlbumsGrid(albums);
         renderSearchArtistsList(artists);
       } catch (err) {
-        if (offlineActive) {
-          enterOfflineMode(); // confirma el estado y rellena skeletons si hace falta
-          renderSearchSkeletons();
-        } else if (list) {
+        if (list) {
           list.innerHTML = \`<div style="padding:40px;text-align:center;color:var(--danger);font-size:14px;">Error: \${err.message}</div>\`;
         }
       }
@@ -7000,26 +7171,45 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     function syncMediaPositionState() {
       if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
       try {
-        // Fuente de verdad de la posicion: en fallback YT el <audio> esta a 0
-        let cur = 0, dur = 0, rate = 1;
-        if (isYtFallback && ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
-          try {
-            cur = ytPlayer.getCurrentTime() || 0;
-            dur = (typeof ytPlayer.getDuration === 'function' ? ytPlayer.getDuration() : 0) || (currentTrack ? (currentTrack.duration || 0) : 0) || 0;
-            rate = (typeof ytPlayer.getPlaybackRate === 'function' ? (ytPlayer.getPlaybackRate() || 1) : 1);
-          } catch (_) {}
-        } else {
-          cur = audio.currentTime || 0;
-          dur = (audio.duration && isFinite(audio.duration)) ? audio.duration : ((currentTrack && currentTrack.duration) || 0);
-          rate = audio.playbackRate || 1;
-        }
+        const dur = (audio.duration && isFinite(audio.duration)) ? audio.duration : ((currentTrack && currentTrack.duration) || 0);
         if (dur > 0) {
           navigator.mediaSession.setPositionState({
             duration: dur,
-            playbackRate: rate,
-            position: Math.min(Math.max(0, cur), dur)
+            playbackRate: audio.playbackRate || 1,
+            position: Math.min(Math.max(0, audio.currentTime || 0), dur)
           });
         }
+      } catch (_) {}
+    }
+
+    // Sync de POSICION hacia el puente nativo de la APK (AndroidBridge).
+    // La notificacion nativa de la app se congela en el punto exacto al
+    // pausar y continua desde ahi al reanudar. Protocolo en segundos:
+    //   { position, duration, playing, rate }
+    // Retrocompatible: si la APK no implementa onPositionChanged, no-op.
+    let lastAndroidSyncMs = 0;
+    function syncAndroidPositionState(playingOverride) {
+      try {
+        if (!(window.AndroidBridge && typeof window.AndroidBridge.onPositionChanged === 'function')) return;
+        let pos = 0;
+        let dur = 0;
+        let rate = 1;
+        if (isYtFallback && ytPlayer) {
+          try { if (typeof ytPlayer.getCurrentTime === 'function') pos = ytPlayer.getCurrentTime() || 0; } catch (_) {}
+          dur = getSafeTrackDuration() || 0;
+        } else {
+          pos = audio.currentTime || 0;
+          dur = (audio.duration && isFinite(audio.duration)) ? audio.duration : ((currentTrack && currentTrack.duration) || 0);
+          rate = audio.playbackRate || 1;
+        }
+        const playing = (typeof playingOverride === 'boolean') ? playingOverride : isPlaying;
+        window.AndroidBridge.onPositionChanged(JSON.stringify({
+          position: pos,
+          duration: dur,
+          playing: playing,
+          rate: rate
+        }));
+        lastAndroidSyncMs = Date.now();
       } catch (_) {}
     }
 
@@ -7027,14 +7217,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       if (window.AndroidBridge && typeof window.AndroidBridge.onPlaybackState === 'function') {
         try { window.AndroidBridge.onPlaybackState(playing); } catch (_) {}
       }
+      // Posicion exacta hacia la APK: la notificacion nativa congela/continua
+      // la barra en el segundo correcto en vez de resetearla a 0:00.
+      syncAndroidPositionState(playing);
       if ('mediaSession' in navigator) {
         try {
           navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
         } catch (_) {}
-        // Re-anclar la posicion del scrubber en CADA cambio de estado
-        // (pausa/play desde la notificacion, lockscreen o auriculares):
-        // sin esto el OS extrapola solo y la barra se cae a 0 (crbug 1167926).
-        syncMediaPositionState();
       }
       const pPlay = $('playIcon');
       const pPause = $('pauseIcon');
@@ -7205,6 +7394,9 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           window.AndroidBridge.onTrackChanged(JSON.stringify(track));
         } catch (_) {}
       }
+      // Cancion nueva: decirle a la APK que arranca en 0 (la duracion
+      // real del stream se manda en cuanto el audio la reporte)
+      syncAndroidPositionState(true);
 
       // Sync with OS MediaSession for lock screen, background audio, and controls
       if ('mediaSession' in navigator) {
@@ -7541,14 +7733,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             if (mSlider && !isScrubbing) mSlider.value = pct;
             const mCur = $('modalTimeElapsed');
             if (mCur) mCur.textContent = curStr;
-
-            // Mantener fresca la posicion del Media Session en fallback YT
-            // (throttle ~5s, mismo criterio que el timeupdate del <audio>)
-            const nowMs = Date.now();
-            if (nowMs - lastPosSyncMs > 5000) {
-              lastPosSyncMs = nowMs;
-              syncMediaPositionState();
-            }
           }
         } catch (_) {}
       }, 250);
@@ -7749,6 +7933,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
 
     audio.addEventListener('seeked', () => {
       syncMediaPositionState();
+      syncAndroidPositionState();
     });
 
     audio.addEventListener('playing', () => {
@@ -7763,6 +7948,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
 
     audio.addEventListener('loadedmetadata', () => {
       syncMediaPositionState();
+      syncAndroidPositionState();
       if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
         const durStr = formatDuration(audio.duration);
         const pDur = $('totalDuration') || $('durTime');
@@ -7809,6 +7995,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         syncMediaPositionState();
       }
 
+      // Posicion hacia la APK cada ~2s: el SO anima la barra de la
+      // notificacion por si mismo; esto mantiene la deriva a ~0 y
+      // asegura un freeze exacto en la proxima pausa.
+      if (nowMs - lastAndroidSyncMs > 2000) {
+        syncAndroidPositionState();
+      }
+
       // A ~90s del final: precarga REAL del siguiente track para que la
       // transicion sea instantanea incluso en segundo plano.
       if (!nearEndPreloaded && !isYtFallback && dur > 0 && (dur - cur) <= 90) {
@@ -7828,6 +8021,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         // Resincronizar posicion: el audio pudo seguir en segundo plano
         // mientras la UI estuvo congelada
         syncMediaPositionState();
+        syncAndroidPositionState();
       }
     });
 
@@ -7836,16 +8030,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       if (audio.error && audio.error.code === 1) return;
       if (!audio.src || audio.src === 'about:blank' || audio.src === window.location.href) return;
       console.warn('Audio stream error:', audio.error);
-      // Sin conexion: el fallback de YT tampoco funcionaria — solo avisar
-      // (una vez cada 15s max) y esperar a que la red vuelva sola.
-      if (offlineActive) {
-        const nowMs = Date.now();
-        if (nowMs - offlineToastAt > 15000) {
-          offlineToastAt = nowMs;
-          showToast(t('offlinePlayToast') || 'Sin conexi\u00f3n \u2014 no se puede reproducir');
-        }
-        return;
-      }
       // si hay un puente local en curso para esta cancion, dejarlo decidir
       // (reproduce directo o cae al iframe el mismo); solo si ya no hay
       // puente pendiente, ir al iframe de inmediato
@@ -8572,165 +8756,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       updatePlayIcons(false);
     }
 
-    // --------------------------------------------------------
-    // Modo offline estilo YT Music: deteccion con debounce (5s, ignora
-    // parpadeos de 1s), skeletons shimmer, banner no-bloqueante y
-    // auto-recuperacion SIN recargar la pagina.
-    // --------------------------------------------------------
-    let offlineActive = false;
-    let offlineArmTimer = null;   // debounce de entrada (5s seguidos sin red)
-    let offlineProbeTimer = null;  // reintento periodico mientras no hay red
-    let offlineToastAt = 0;        // throttle del toast "sin conexion"
-
-    function probeNetworkOnline() {
-      // fetch resuelve (aunque sea 404/500) si la RED funciona; solo
-      // rechaza cuando no hay ruta al servidor.
-      return fetch('/api/home', { cache: 'no-store' })
-        .then(() => true)
-        .catch(() => false);
-    }
-
-    function renderSkeletonsIn(gridId, count) {
-      const grid = $(gridId);
-      if (!grid) return;
-      if (grid.children.length > 0) return; // no pisar contenido real ya pintado
-      for (let i = 0; i < count; i++) {
-        const el = document.createElement('div');
-        el.className = 'aurora-skel-card';
-        el.setAttribute('aria-hidden', 'true');
-        el.innerHTML = '<div class="aurora-skel aurora-skel-thumb"></div><div class="aurora-skel-info"><div class="aurora-skel aurora-skel-line" style="width:75%"></div><div class="aurora-skel aurora-skel-line aurora-skel-line-sm" style="width:45%"></div></div>';
-        grid.appendChild(el);
-      }
-    }
-
-    function renderSearchSkeletons() {
-      const list = $('searchResultsList');
-      if (!list) return;
-      list.innerHTML = '';
-      for (let i = 0; i < 7; i++) {
-        const el = document.createElement('div');
-        el.className = 'aurora-skel-row';
-        el.setAttribute('aria-hidden', 'true');
-        el.innerHTML = '<div class="aurora-skel aurora-skel-thumb"></div><div class="aurora-skel-info"><div class="aurora-skel aurora-skel-line" style="width:62%"></div><div class="aurora-skel aurora-skel-line aurora-skel-line-sm" style="width:38%"></div></div>';
-        list.appendChild(el);
-      }
-    }
-
-    function enterOfflineMode() {
-      if (offlineActive) return;
-      offlineActive = true;
-      document.body.classList.add('aurora-offline');
-      const banner = $('offlineBanner');
-      if (banner) banner.classList.add('visible');
-      // Skeletons solo en secciones que quedaron vacias (estilo YT Music:
-      // "como si quisiera cargar pero no carga"); lo ya renderizado se queda.
-      if (!window._homeData) {
-        renderSkeletonsIn('homeQuickPicksGrid', 9);
-        renderSkeletonsIn('homeTrendingGrid', 8);
-        renderSkeletonsIn('homeGrid', 8);
-      }
-      // Mientras no haya red: sondear cada 20s y salir solo en cuanto vuelva
-      if (offlineProbeTimer) clearInterval(offlineProbeTimer);
-      offlineProbeTimer = setInterval(async () => {
-        const ok = await probeNetworkOnline();
-        if (ok) exitOfflineMode(true);
-      }, 20000);
-    }
-
-    function exitOfflineMode(recovered) {
-      if (!offlineActive) return;
-      offlineActive = false;
-      document.body.classList.remove('aurora-offline');
-      const banner = $('offlineBanner');
-      if (banner) banner.classList.remove('visible');
-      if (offlineProbeTimer) { clearInterval(offlineProbeTimer); offlineProbeTimer = null; }
-      // Limpiar cualquier skeleton que haya quedado
-      document.querySelectorAll('.aurora-skel-card, .aurora-skel-row').forEach(el => el.remove());
-      if (recovered) {
-        showToast(t('onlineBackToast') || 'Conexi\u00f3n restablecida');
-        loadHomeFeed(); // re-cargar el contenido SIN recargar la pagina
-      }
-    }
-
-    async function manualRetryOnline() {
-      showToast(t('offlineRetryBtn') || 'Reintentando...');
-      const ok = await probeNetworkOnline();
-      if (ok) exitOfflineMode(true);
-    }
-
-    window.addEventListener('offline', () => {
-      // Debounce: la UI offline solo sale tras 5s SEGUIDOS sin red — asi un
-      // parpadeo de 1s no molesta.
-      clearTimeout(offlineArmTimer);
-      offlineArmTimer = setTimeout(async () => {
-        if (offlineActive) return;
-        if (navigator.onLine === false) { enterOfflineMode(); return; }
-        const ok = await probeNetworkOnline(); // wifi "conectada" sin internet
-        if (!ok) enterOfflineMode();
-      }, 5000);
-    });
-
-    window.addEventListener('online', () => {
-      clearTimeout(offlineArmTimer);
-      if (!offlineActive) return;
-      // La red volvio: verificar con un sondeo real y recuperar todo
-      probeNetworkOnline().then(ok => { if (ok) exitOfflineMode(true); });
-    });
-
-    async function loadHomeFeed() {
-      try {
-        const res = await fetch('/api/home');
-        if (!res.ok) throw new Error('bad status ' + res.status);
-        const data = await res.json();
-        window._homeData = data;
-        renderChips();
-        renderQuickPicks();
-        renderRecommendedMix();
-        renderHomeTrending();
-
-        // Render Ultra HQ Grid (4 and 4 side-by-side)
-        const grid = $('homeGrid');
-        if (grid && data.featured) {
-          grid.innerHTML = '';
-          data.featured.slice(0, 16).forEach(t => {
-            const card = document.createElement('div');
-            card.className = 'ytm-quick-card';
-            card.innerHTML = \`
-                <div class="ytm-quick-thumb-box">
-                  <img class="ytm-quick-thumb" src="\${t.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${t.id}/hqdefault.jpg'">
-                  <div class="ytm-quick-play-btn" title="Reproducir">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
-                  </div>
-                </div>
-                <div class="ytm-quick-info">
-                  <div class="ytm-quick-title">\${t.title}\${t.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
-                  <div class="ytm-quick-artist">\${t.artist}</div>
-                </div>
-                <button class="ytm-quick-opt-btn" title="Más opciones">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-                </button>
-              \`;
-            card.onclick = (e) => {
-              if (e.target.closest('.ytm-quick-opt-btn')) {
-                e.stopPropagation();
-                openTrackMenu(t);
-                return;
-              }
-              playTrack(t, null, false, false);
-            };
-            grid.appendChild(card);
-          });
-        }
-        // Si estabamos en modo offline y esto salio bien: la red volvio
-        if (offlineActive) exitOfflineMode(false);
-        return true;
-      } catch (err) {
-        console.warn('Failed to load home feed:', err);
-        enterOfflineMode();
-        return false;
-      }
-    }
-
     async function initApp() {
       // Explicitly stop any audio on startup/page reload (PREVENTS AUTOPLAY BUG!)
       if (audio) {
@@ -8842,9 +8867,56 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         };
       }
 
-      // Home feed con modo offline + auto-recuperacion (loadHomeFeed definido
-      // en el bloque de offline, mas arriba)
-      await loadHomeFeed();
+      // Fetch curated home feed from backend
+      try {
+        const res = await fetch('/api/home');
+        if (res.ok) {
+          const data = await res.json();
+          window._homeData = data;
+          try { if (window.__auroraOffline) window.__auroraOffline.setDataReady(); } catch (_) {}
+          renderChips();
+          renderQuickPicks();
+          renderRecommendedMix();
+          renderHomeTrending();
+
+          // Render Ultra HQ Grid (4 and 4 side-by-side)
+          const grid = $('homeGrid');
+          if (grid && data.featured) {
+            grid.innerHTML = '';
+            data.featured.slice(0, 16).forEach(t => {
+              const card = document.createElement('div');
+              card.className = 'ytm-quick-card';
+              card.innerHTML = \`
+                <div class="ytm-quick-thumb-box">
+                  <img class="ytm-quick-thumb" src="\${t.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${t.id}/hqdefault.jpg'">
+                  <div class="ytm-quick-play-btn" title="Reproducir">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                  </div>
+                </div>
+                <div class="ytm-quick-info">
+                  <div class="ytm-quick-title">\${t.title}\${t.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
+                  <div class="ytm-quick-artist">\${t.artist}</div>
+                </div>
+                <button class="ytm-quick-opt-btn" title="Más opciones">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                </button>
+              \`;
+              card.onclick = (e) => {
+                if (e.target.closest('.ytm-quick-opt-btn')) {
+                  e.stopPropagation();
+                  openTrackMenu(t);
+                  return;
+                }
+                playTrack(t, null, false, false);
+              };
+              grid.appendChild(card);
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load home feed:', err);
+        try { if (window.__auroraOffline) window.__auroraOffline.reportNetFail(); } catch (_) {}
+      }
 
       // Strict background scroll prevention on mobile touch for modals
       const sModalEl = $('settingsModal');
