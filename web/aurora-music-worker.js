@@ -1144,7 +1144,7 @@ export default {
         if (!h) return new Response("APK not found", { status: 404 });
         const hh = new Headers();
         hh.set("Content-Type", "application/vnd.android.package-archive");
-        hh.set("Content-Disposition", 'attachment; filename="AuroraMusic.apk"');
+        hh.set("Content-Disposition", 'attachment; filename="AuroraMusic.v1.0.0.apk"');
         hh.set("Content-Length", h.size.toString());
         hh.set("Accept-Ranges", "bytes");
         hh.set("Cache-Control", "public, max-age=3600");
@@ -1183,7 +1183,7 @@ export default {
           if (robj) {
             const rheaders = new Headers();
             rheaders.set("Content-Type", "application/vnd.android.package-archive");
-            rheaders.set("Content-Disposition", 'attachment; filename="AuroraMusic.apk"');
+            rheaders.set("Content-Disposition", 'attachment; filename="AuroraMusic.v1.0.0.apk"');
             rheaders.set("Content-Length", rangeLen.toString());
             rheaders.set("Content-Range", "bytes " + rangeStart + "-" + (rangeStart + rangeLen - 1) + "/" + totalSize);
             rheaders.set("Accept-Ranges", "bytes");
@@ -1197,7 +1197,7 @@ export default {
       if (!obj) return new Response("APK not found", { status: 404 });
       const headers = new Headers();
       headers.set("Content-Type", "application/vnd.android.package-archive");
-      headers.set("Content-Disposition", 'attachment; filename="AuroraMusic.apk"');
+      headers.set("Content-Disposition", 'attachment; filename="AuroraMusic.v1.0.0.apk"');
       headers.set("Content-Length", obj.size.toString());
       headers.set("Accept-Ranges", "bytes");
       headers.set("Cache-Control", "public, max-age=3600");
@@ -4219,7 +4219,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
               </div>
               <h2 style="font-size:23px;font-weight:800;color:#fff;margin:0 0 10px;letter-spacing:-0.3px;" data-i18n="appPageTitle">Aurora Music para Android</h2>
               <p style="font-size:14.5px;color:#bbb;line-height:1.6;margin:0 auto 24px;max-width:540px;" data-i18n="appPageSub">Toda tu m&uacute;sica en una app nativa: controles desde la notificaci&oacute;n, reproducci&oacute;n en segundo plano y la misma experiencia de la web.</p>
-              <a class="app-cta-btn" id="appDownloadBtn" href="https://github.com/DevAuroraX/Aurora-Music/releases/latest/download/AuroraMusic.apk" rel="noopener">
+              <a class="app-cta-btn" id="appDownloadBtn" href="https://github.com/DevAuroraX/Aurora-Music/releases/latest/download/AuroraMusic.v1.0.0.apk" rel="noopener">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 <span data-i18n="appDownloadBtn">Descargar APK</span>
               </a>
