@@ -243,7 +243,7 @@ async function searchYouTubeMusic(query, env = null) {
               album: r.album || "Catálogo Aurora",
               duration: r.duration || 210,
               duration_text: formatDuration(r.duration || 210),
-              thumb: `https://i.ytimg.com/vi/${r.vid}/hqdefault.jpg`,
+              thumb: `https://i.ytimg.com/vi/${r.vid}/mqdefault.jpg`,
               r2Ready: true,
               plays: r.plays || 0
             });
@@ -339,6 +339,18 @@ async function searchYouTubeMusic(query, env = null) {
   return { results: allSongs, albums: albums.slice(0, 12), artists: artists.slice(0, 10) };
 }
 
+// v2.12 — miniatura de video de YouTube NORMALIZADA: sin query de
+// tracking (?sqp=...) y en su variante 16:9 limpia (mqdefault). El
+// hqdefault/sqdefault/sddefault son 4:3 con bandas negras horneadas:
+// en una tarjeta cuadrada la banda queda a la vista. Con la 16:9 el
+// object-fit:cover recorta un cuadro limpio igual que las portadas.
+function normVideoThumb(u) {
+  let t = String(u || "");
+  if (!/^https?:\/\/i\.ytimg\.com\/vi\//.test(t)) return t;
+  t = t.split("?")[0];
+  return t.replace(/\/(hq|sq|sd)default\.jpg$/, "/mqdefault.jpg");
+}
+
 function parseShelfItem(it) {
   const r = it.musicResponsiveListItemRenderer;
   if (!r) return null;
@@ -382,6 +394,7 @@ function parseShelfItem(it) {
       // Upgrade resolution if applicable (w120-h120 -> w544-h544)
       thumb = thumb.replace(/=w\d+-h\d+/, "=w544-h544");
     }
+    thumb = normVideoThumb(thumb);
   } catch (_) {}
 
   return {
@@ -391,7 +404,7 @@ function parseShelfItem(it) {
     album,
     duration,
     duration_text: duration_text || "3:30",
-    thumb: thumb || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+    thumb: thumb || `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`,
   };
 }
 
@@ -996,22 +1009,22 @@ async function enrichTracksWithArt(env, tracks, novelBudget) {
 }
 
 const DEFAULT_TRENDING = [
-  { id: "kIft-LUHHVA", title: "Espresso", artist: "Sabrina Carpenter", album: "Short n' Sweet", duration: 176, duration_text: "2:56", thumb: "https://i.ytimg.com/vi/kIft-LUHHVA/hqdefault.jpg", r2Ready: true, rank: 1 },
-  { id: "kPa7bsKwL-c", title: "Die With A Smile", artist: "Lady Gaga, Bruno Mars", album: "Die With A Smile", duration: 252, duration_text: "4:12", thumb: "https://i.ytimg.com/vi/kPa7bsKwL-c/hqdefault.jpg", r2Ready: true, rank: 2 },
-  { id: "V9PVRfjEBTI", title: "BIRDS OF A FEATHER", artist: "Billie Eilish", album: "HIT ME HARD AND SOFT", duration: 194, duration_text: "3:14", thumb: "https://i.ytimg.com/vi/V9PVRfjEBTI/hqdefault.jpg", r2Ready: true, rank: 3 },
-  { id: "KEG7b851Ric", title: "Taste", artist: "Sabrina Carpenter", album: "Short n' Sweet", duration: 158, duration_text: "2:38", thumb: "https://i.ytimg.com/vi/KEG7b851Ric/hqdefault.jpg", r2Ready: true, rank: 4 },
-  { id: "VZ-oGLluGAc", title: "Good Luck, Babe!", artist: "Chappell Roan", album: "Good Luck, Babe!", duration: 219, duration_text: "3:39", thumb: "https://i.ytimg.com/vi/VZ-oGLluGAc/hqdefault.jpg", r2Ready: true, rank: 5 },
-  { id: "phLb_SoPBlA", title: "Not Like Us", artist: "Kendrick Lamar", album: "Not Like Us", duration: 275, duration_text: "4:35", thumb: "https://i.ytimg.com/vi/phLb_SoPBlA/hqdefault.jpg", r2Ready: true, rank: 6 },
-  { id: "mi-JD4jGVUQ", title: "Si Antes Te Hubiera Conocido", artist: "KAROL G", album: "Si Antes Te Hubiera Conocido", duration: 196, duration_text: "3:16", thumb: "https://i.ytimg.com/vi/mi-JD4jGVUQ/hqdefault.jpg", r2Ready: true, rank: 7 },
-  { id: "UWn9RdueB7E", title: "Gata Only", artist: "FloyyMenor, Cris Mj", album: "Gata Only", duration: 222, duration_text: "3:42", thumb: "https://i.ytimg.com/vi/UWn9RdueB7E/hqdefault.jpg", r2Ready: true, rank: 8 },
-  { id: "TiebZllW8As", title: "DtMF", artist: "Bad Bunny", album: "nadie sabe lo que va a pasar mañana", duration: 238, duration_text: "3:58", thumb: "https://i.ytimg.com/vi/TiebZllW8As/hqdefault.jpg", r2Ready: true, rank: 9 },
-  { id: "HekrZ0QcI3g", title: "PERRO NEGRO", artist: "Bad Bunny, Feid", album: "nadie sabe lo que va a pasar mañana", duration: 163, duration_text: "2:43", thumb: "https://i.ytimg.com/vi/HekrZ0QcI3g/hqdefault.jpg", r2Ready: true, rank: 10 },
-  { id: "3_g2un5M350", title: "Starboy", artist: "The Weeknd, Daft Punk", album: "Starboy", duration: 231, duration_text: "3:51", thumb: "https://i.ytimg.com/vi/3_g2un5M350/hqdefault.jpg", r2Ready: true, rank: 11 },
-  { id: "J7p4bzqLvCw", title: "Blinding Lights", artist: "The Weeknd", album: "After Hours", duration: 202, duration_text: "3:22", thumb: "https://i.ytimg.com/vi/J7p4bzqLvCw/hqdefault.jpg", r2Ready: true, rank: 12 },
-  { id: "Cl5Vkd4N03Q", title: "After Dark", artist: "Mr.Kitty", album: "Time", duration: 257, duration_text: "4:17", thumb: "https://i.ytimg.com/vi/Cl5Vkd4N03Q/hqdefault.jpg", r2Ready: true, rank: 13 },
-  { id: "qSxHbFKp-Wo", title: "Reggaeton Champagne", artist: "Bellakath", album: "Kittyponeo", duration: 165, duration_text: "2:45", thumb: "https://i.ytimg.com/vi/qSxHbFKp-Wo/hqdefault.jpg", r2Ready: true, rank: 14 },
-  { id: "irmc5n4ZIrM", title: "HOLY WAR FUNK", artist: "DJ Vz7", album: "Single", duration: 124, duration_text: "2:04", thumb: "https://i.ytimg.com/vi/irmc5n4ZIrM/hqdefault.jpg", r2Ready: true, rank: 15 },
-  { id: "2Qt-h5gqbn8", title: "Feeling", artist: "Juice WRLD", album: "Death Race for Love", duration: 212, duration_text: "3:32", thumb: "https://i.ytimg.com/vi/2Qt-h5gqbn8/hqdefault.jpg", r2Ready: true, rank: 16 }
+  { id: "kIft-LUHHVA", title: "Espresso", artist: "Sabrina Carpenter", album: "Short n' Sweet", duration: 176, duration_text: "2:56", thumb: "https://i.ytimg.com/vi/kIft-LUHHVA/mqdefault.jpg", r2Ready: true, rank: 1 },
+  { id: "kPa7bsKwL-c", title: "Die With A Smile", artist: "Lady Gaga, Bruno Mars", album: "Die With A Smile", duration: 252, duration_text: "4:12", thumb: "https://i.ytimg.com/vi/kPa7bsKwL-c/mqdefault.jpg", r2Ready: true, rank: 2 },
+  { id: "V9PVRfjEBTI", title: "BIRDS OF A FEATHER", artist: "Billie Eilish", album: "HIT ME HARD AND SOFT", duration: 194, duration_text: "3:14", thumb: "https://i.ytimg.com/vi/V9PVRfjEBTI/mqdefault.jpg", r2Ready: true, rank: 3 },
+  { id: "KEG7b851Ric", title: "Taste", artist: "Sabrina Carpenter", album: "Short n' Sweet", duration: 158, duration_text: "2:38", thumb: "https://i.ytimg.com/vi/KEG7b851Ric/mqdefault.jpg", r2Ready: true, rank: 4 },
+  { id: "VZ-oGLluGAc", title: "Good Luck, Babe!", artist: "Chappell Roan", album: "Good Luck, Babe!", duration: 219, duration_text: "3:39", thumb: "https://i.ytimg.com/vi/VZ-oGLluGAc/mqdefault.jpg", r2Ready: true, rank: 5 },
+  { id: "phLb_SoPBlA", title: "Not Like Us", artist: "Kendrick Lamar", album: "Not Like Us", duration: 275, duration_text: "4:35", thumb: "https://i.ytimg.com/vi/phLb_SoPBlA/mqdefault.jpg", r2Ready: true, rank: 6 },
+  { id: "mi-JD4jGVUQ", title: "Si Antes Te Hubiera Conocido", artist: "KAROL G", album: "Si Antes Te Hubiera Conocido", duration: 196, duration_text: "3:16", thumb: "https://i.ytimg.com/vi/mi-JD4jGVUQ/mqdefault.jpg", r2Ready: true, rank: 7 },
+  { id: "UWn9RdueB7E", title: "Gata Only", artist: "FloyyMenor, Cris Mj", album: "Gata Only", duration: 222, duration_text: "3:42", thumb: "https://i.ytimg.com/vi/UWn9RdueB7E/mqdefault.jpg", r2Ready: true, rank: 8 },
+  { id: "TiebZllW8As", title: "DtMF", artist: "Bad Bunny", album: "nadie sabe lo que va a pasar mañana", duration: 238, duration_text: "3:58", thumb: "https://i.ytimg.com/vi/TiebZllW8As/mqdefault.jpg", r2Ready: true, rank: 9 },
+  { id: "HekrZ0QcI3g", title: "PERRO NEGRO", artist: "Bad Bunny, Feid", album: "nadie sabe lo que va a pasar mañana", duration: 163, duration_text: "2:43", thumb: "https://i.ytimg.com/vi/HekrZ0QcI3g/mqdefault.jpg", r2Ready: true, rank: 10 },
+  { id: "3_g2un5M350", title: "Starboy", artist: "The Weeknd, Daft Punk", album: "Starboy", duration: 231, duration_text: "3:51", thumb: "https://i.ytimg.com/vi/3_g2un5M350/mqdefault.jpg", r2Ready: true, rank: 11 },
+  { id: "J7p4bzqLvCw", title: "Blinding Lights", artist: "The Weeknd", album: "After Hours", duration: 202, duration_text: "3:22", thumb: "https://i.ytimg.com/vi/J7p4bzqLvCw/mqdefault.jpg", r2Ready: true, rank: 12 },
+  { id: "Cl5Vkd4N03Q", title: "After Dark", artist: "Mr.Kitty", album: "Time", duration: 257, duration_text: "4:17", thumb: "https://i.ytimg.com/vi/Cl5Vkd4N03Q/mqdefault.jpg", r2Ready: true, rank: 13 },
+  { id: "qSxHbFKp-Wo", title: "Reggaeton Champagne", artist: "Bellakath", album: "Kittyponeo", duration: 165, duration_text: "2:45", thumb: "https://i.ytimg.com/vi/qSxHbFKp-Wo/mqdefault.jpg", r2Ready: true, rank: 14 },
+  { id: "irmc5n4ZIrM", title: "HOLY WAR FUNK", artist: "DJ Vz7", album: "Single", duration: 124, duration_text: "2:04", thumb: "https://i.ytimg.com/vi/irmc5n4ZIrM/mqdefault.jpg", r2Ready: true, rank: 15 },
+  { id: "2Qt-h5gqbn8", title: "Feeling", artist: "Juice WRLD", album: "Death Race for Love", duration: 212, duration_text: "3:32", thumb: "https://i.ytimg.com/vi/2Qt-h5gqbn8/mqdefault.jpg", r2Ready: true, rank: 16 }
 ];
 
 // ------------------------------------------------------------
@@ -1148,7 +1161,7 @@ async function getCuratedHome(env) {
           album: r.album || "Aurora Hits",
           duration: r.duration || 210,
           duration_text: formatDuration(r.duration || 210),
-          thumb: `https://i.ytimg.com/vi/${r.vid}/hqdefault.jpg`,
+          thumb: `https://i.ytimg.com/vi/${r.vid}/mqdefault.jpg`,
           r2Ready: true,
           plays: r.plays || 0
         }));
@@ -1165,7 +1178,7 @@ async function getCuratedHome(env) {
           album: r.album || "Novedad",
           duration: r.duration || 210,
           duration_text: formatDuration(r.duration || 210),
-          thumb: `https://i.ytimg.com/vi/${r.vid}/hqdefault.jpg`,
+          thumb: `https://i.ytimg.com/vi/${r.vid}/mqdefault.jpg`,
           r2Ready: true
         }));
       }
@@ -1173,12 +1186,12 @@ async function getCuratedHome(env) {
   }
 
   const defaultFeatured = [
-    { id: "Cl5Vkd4N03Q", title: "After Dark", artist: "Mr.Kitty", album: "Time", duration_text: "4:17", thumb: "https://i.ytimg.com/vi/Cl5Vkd4N03Q/hqdefault.jpg", r2Ready: true },
-    { id: "qSxHbFKp-Wo", title: "Reggaeton Champagne", artist: "Bellakath", album: "Kittyponeo", duration_text: "2:45", thumb: "https://i.ytimg.com/vi/qSxHbFKp-Wo/hqdefault.jpg", r2Ready: true },
-    { id: "irmc5n4ZIrM", title: "HOLY WAR FUNK", artist: "DJ Vz7", album: "Single", duration_text: "2:04", thumb: "https://i.ytimg.com/vi/irmc5n4ZIrM/hqdefault.jpg", r2Ready: true },
-    { id: "2Qt-h5gqbn8", title: "Feeling", artist: "Juice WRLD", album: "Death Race for Love", duration_text: "3:32", thumb: "https://i.ytimg.com/vi/2Qt-h5gqbn8/hqdefault.jpg", r2Ready: true },
-    { id: "jvm6DpqqbLk", title: "Sad Girl", artist: "Lana Del Rey", album: "Ultraviolence", duration_text: "5:17", thumb: "https://i.ytimg.com/vi/jvm6DpqqbLk/hqdefault.jpg", r2Ready: true },
-    { id: "dQw4w9WgXcQ", title: "Never Gonna Give You Up", artist: "Rick Astley", album: "Whenever You Need Somebody", duration_text: "3:33", thumb: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", r2Ready: true }
+    { id: "Cl5Vkd4N03Q", title: "After Dark", artist: "Mr.Kitty", album: "Time", duration_text: "4:17", thumb: "https://i.ytimg.com/vi/Cl5Vkd4N03Q/mqdefault.jpg", r2Ready: true },
+    { id: "qSxHbFKp-Wo", title: "Reggaeton Champagne", artist: "Bellakath", album: "Kittyponeo", duration_text: "2:45", thumb: "https://i.ytimg.com/vi/qSxHbFKp-Wo/mqdefault.jpg", r2Ready: true },
+    { id: "irmc5n4ZIrM", title: "HOLY WAR FUNK", artist: "DJ Vz7", album: "Single", duration_text: "2:04", thumb: "https://i.ytimg.com/vi/irmc5n4ZIrM/mqdefault.jpg", r2Ready: true },
+    { id: "2Qt-h5gqbn8", title: "Feeling", artist: "Juice WRLD", album: "Death Race for Love", duration_text: "3:32", thumb: "https://i.ytimg.com/vi/2Qt-h5gqbn8/mqdefault.jpg", r2Ready: true },
+    { id: "jvm6DpqqbLk", title: "Sad Girl", artist: "Lana Del Rey", album: "Ultraviolence", duration_text: "5:17", thumb: "https://i.ytimg.com/vi/jvm6DpqqbLk/mqdefault.jpg", r2Ready: true },
+    { id: "dQw4w9WgXcQ", title: "Never Gonna Give You Up", artist: "Rick Astley", album: "Whenever You Need Somebody", duration_text: "3:33", thumb: "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", r2Ready: true }
   ];
 
   const trendingRes = await getTrendingTracks(env);
@@ -1262,11 +1275,12 @@ async function fetchYTMRadioQueue(vid) {
         duration = m * 60 + s;
       }
 
-      let thumb = `https://i.ytimg.com/vi/${r.videoId}/hqdefault.jpg`;
+      let thumb = `https://i.ytimg.com/vi/${r.videoId}/mqdefault.jpg`;
       const thumbs = r.thumbnail?.thumbnails;
       if (thumbs && thumbs.length) {
         thumb = thumbs[thumbs.length - 1].url;
       }
+      thumb = normVideoThumb(thumb);
 
       radioTracks.push({
         id: r.videoId,
@@ -1451,7 +1465,7 @@ export default {
               album: row.album || "Aurora Hits",
               duration: row.duration || 210,
               duration_text: formatDuration(row.duration || 210),
-              thumb: `https://i.ytimg.com/vi/${row.vid}/hqdefault.jpg`,
+              thumb: `https://i.ytimg.com/vi/${row.vid}/mqdefault.jpg`,
               r2Ready: true
             };
             await enrichTracksWithArt(env, [rowTrack], 1);
@@ -1473,7 +1487,7 @@ export default {
         album: "Aurora Music",
         duration: 210,
         duration_text: "3:30",
-        thumb: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`
+        thumb: `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`
       });
     }
 
@@ -1815,7 +1829,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
   <meta name="theme-color" content="#030303">
-  <meta name="description" content="Aurora Music — Tu plataforma de música de alta fidelidad con audio Ultra HQ sin interrupciones.">
+  <meta name="description" content="Aurora Music — Tu plataforma de música de alta fidelidad con audio de alta calidad sin interrupciones.">
   <title>Aurora Music</title>
   <link rel="icon" type="image/svg+xml" href="/icon.svg">
   <link rel="manifest" href="/manifest.json">
@@ -2529,20 +2543,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     .icon-btn.liked svg path {
       fill: var(--ytm-heart) !important;
       stroke: var(--ytm-heart) !important;
-    }
-    .r2-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      font-size: 10px;
-      font-weight: 700;
-      color: #38bdf8;
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      border-radius: 4px;
-      padding: 1px 5px;
-      margin-left: 6px;
-      letter-spacing: 0.5px;
     }
     .track-dur {
       font-size: 12px;
@@ -3541,12 +3541,9 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-x: contain;
     }
+    .ytm-horizontal-scroll { scrollbar-width: none; }
     .ytm-horizontal-scroll::-webkit-scrollbar {
-      height: 6px;
-    }
-    .ytm-horizontal-scroll::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.18);
-      border-radius: 3px;
+      display: none;
     }
     .ytm-aálbum-card {
       flex: 0 0 150px;
@@ -3792,13 +3789,10 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       scroll-snap-type: x mandatory;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-x: contain;
+      scrollbar-width: none;
     }
     .ytm-cards-slider::-webkit-scrollbar {
-      height: 6px;
-    }
-    .ytm-cards-slider::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.16);
-      border-radius: 3px;
+      display: none;
     }
     .ytm-cards-slider .card {
       flex: 0 0 calc((100% - 48px) / 4);
@@ -4043,8 +4037,59 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       padding-bottom: 6px;
       -webkit-overflow-scrolling: touch;
     }
-    .ytm-share-apps::-webkit-scrollbar { height: 4px; }
-    .ytm-share-apps::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+    .ytm-share-apps { scrollbar-width: none; }
+    .ytm-share-apps::-webkit-scrollbar { display: none; }
+
+    /* v2.12 — sin barras de scroll visibles en pantallas táctiles (la
+       línea gorda que salía al deslizar a un lado y la del borde) */
+    @media (pointer: coarse) {
+      ::-webkit-scrollbar { display: none !important; }
+      * { scrollbar-width: none !important; }
+    }
+
+    /* v2.12 — táctil: sin estados hover (la tarjeta ya NO se pone blanca
+       al arrastrar el dedo encima de un acceso rápido) */
+    @media (hover: none), (pointer: coarse) {
+      .ytm-quick-card:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.06); transform: none; }
+      .ytm-quick-card:hover .ytm-quick-play-btn { opacity: 0; }
+      .card:hover { background: rgba(255, 255, 255, 0.03); transform: none; }
+      .card:hover .card-play-overlay { opacity: 0; transform: translateY(6px); }
+      .track-row:hover { background: rgba(255, 255, 255, 0.02); border-color: transparent; }
+      .track-row:hover .track-row-play { opacity: 0; }
+      .ytm-chip:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+      .ytm-quick-opt-btn:hover { background: none; color: var(--text-dim); }
+      .ytm-aálbum-card:hover { background: rgba(255, 255, 255, 0.04); transform: none; border-color: rgba(255, 255, 255, 0.06); }
+      .aurora-set-row:hover { background: rgba(255, 255, 255, 0.04); }
+    }
+
+    /* v2.12 — ajustes sencillos: filas de lista con chevron */
+    .aurora-set-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 13px 2px;
+      cursor: pointer;
+      text-align: left;
+      color: #fff;
+      transition: background 0.15s;
+      font-family: inherit;
+    }
+    .aurora-set-row-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .aurora-set-row-title { font-size: 14.5px; font-weight: 700; color: #fff; }
+    .aurora-set-row-sub { font-size: 12px; color: #888; }
+    .aurora-set-row-val { font-size: 13px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42%; }
+    .aurora-set-row-ico { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .aurora-set-chevron { color: var(--text-dim); flex-shrink: 0; }
+    /* v2.12 — pantallas angostas: fila de una linea limpia (sin el valor
+       a la derecha, como los ajustes nativos) para que el titulo no se
+       parta en dos lineas */
+    @media (max-width: 480px) {
+      .aurora-set-row { padding: 12px 2px; }
+      .aurora-set-row-val { display: none; }
+    }
     .ytm-share-app {
       display: flex;
       flex-direction: column;
@@ -4366,7 +4411,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             <div>
               <div class="ytm-sec-subtitle" data-i18n="quickPicksSub">Tus accesos rápidos</div>
               <h2 class="ytm-sec-title">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
                 <span data-i18n="quickPicks">Vuelve a escuchar</span>
               </h2>
             </div>
@@ -4379,7 +4423,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
               <div>
                 <div class="ytm-sec-subtitle" data-i18n="recommendedMixSub">Joyas de tu historial</div>
                 <h2 class="ytm-sec-title">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
                   <span data-i18n="recommendedMix">Para Ti</span>
                 </h2>
               </div>
@@ -4392,7 +4435,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             <div>
               <div class="ytm-sec-subtitle" data-i18n="trendingSub">Los ééxitos virales del momento</div>
               <h2 class="ytm-sec-title">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
                 <span data-i18n="trending">Tendencias globales</span>
               </h2>
             </div>
@@ -4402,13 +4444,12 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           </div>
           <div class="ytm-quad-grid" id="homeTrendingGrid"></div>
 
-          <!-- 4. Catálogo Ultra HQ (R2) -->
+          <!-- 4. Lo más escuchado (rota con las reproducciones reales) -->
           <div class="ytm-sec-header">
             <div>
               <div class="ytm-sec-subtitle" data-i18n="topCatalogSub">Audio lossless sin compresión</div>
               <h2 class="ytm-sec-title">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                <span data-i18n="topCatalog">Ééxitos Ultra HQ (R2)</span>
+                <span data-i18n="topCatalog">Lo más escuchado</span>
               </h2>
             </div>
           </div>
@@ -4423,7 +4464,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           <div>
             <div class="ytm-sec-subtitle" data-i18n="trendingSub">Los ééxitos virales del momento</div>
             <h2 class="ytm-sec-title">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
               <span data-i18n="trending">Tendencias y Ééxitos del Momento</span>
             </h2>
           </div>
@@ -4440,7 +4480,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             <div>
               <div class="ytm-sec-subtitle" data-i18n="activityLog">Búsquedas recientes</div>
               <h2 class="ytm-sec-title">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 <span data-i18n="recentSearches">Historial de búsqueda</span>
               </h2>
             </div>
@@ -4453,7 +4492,6 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             <div>
               <div class="ytm-sec-subtitle" data-i18n="trendingSub">Descubre música</div>
               <h2 class="ytm-sec-title">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
                 <span data-i18n="trendingSearches">Búsquedas sugeridas</span>
               </h2>
             </div>
@@ -4789,106 +4827,83 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         <button class="settings-close-btn" onclick="closeSettingsModal()" title="Cerrar">&times;</button>
       </div>
 
-      <!-- Section: Language Selection (Dropdown) -->
-      <div class="settings-card-section">
-        <div class="settings-sec-hdr">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-            <span class="settings-sec-title" data-i18n="languageSelect">Interface Language</span>
+      <!-- Section: Language (fila simple v2.12) -->
+      <div class="settings-card-section" style="padding:6px 16px;">
+        <button type="button" class="aurora-set-row" id="langDropdownTrigger" onclick="toggleLangDropdown(event)">
+          <div class="aurora-set-row-ico" style="background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.25);">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           </div>
-          <span class="settings-sec-badge" data-i18n="languagesCount">12 languages</span>
-        </div>
-        <p class="settings-sec-sub" data-i18n="languageSelectSub">Choose your preferred language for the entire interface.</p>
+          <div class="aurora-set-row-txt">
+            <span class="aurora-set-row-title" data-i18n="languageSelect">Idioma de la interfaz</span>
+            <span class="aurora-set-row-sub" data-i18n="languageSelectSub">Elige el idioma para toda la interfaz.</span>
+          </div>
+          <span class="aurora-set-row-val" id="langSelectedName">English</span>
+          <svg class="aurora-set-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
         
         <div class="ytm-dropdown-wrapper" id="langDropdownWrap">
-          <button type="button" class="ytm-dropdown-btn" id="langDropdownTrigger" onclick="toggleLangDropdown(event)">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <span class="ytm-dropdown-pill-code" id="langSelectedCode">EN</span>
-              <span class="ytm-dropdown-val" id="langSelectedName">English</span>
-            </div>
-            <svg class="ytm-dropdown-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
           <div class="ytm-dropdown-list" id="langDropdownMenu"></div>
         </div>
       </div>
 
-      <!-- Section: Audio Quality (Dropdown) -->
-      <div class="settings-card-section">
-        <div class="settings-sec-hdr">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
-            <span class="settings-sec-title" data-i18n="audioQuality">Audio Quality</span>
+      <!-- Section: Resolución de Audio (fila simple v2.12) -->
+      <div class="settings-card-section" style="padding:6px 16px;">
+        <button type="button" class="aurora-set-row" id="qualityDropdownTrigger" onclick="toggleQualityDropdown(event)">
+          <div class="aurora-set-row-ico" style="background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.25);">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
           </div>
-          <span class="settings-sec-badge" id="qualityHeaderBadge" style="background:rgba(56,189,248,0.15);color:var(--primary);border-color:rgba(56,189,248,0.3);">Lossless HQ</span>
-        </div>
-        <p class="settings-sec-sub" data-i18n="audioQualityDesc">Adaptive low-latency streaming with edge acceleration up to 256kbps AAC / Lossless FLAC in R2.</p>
+          <div class="aurora-set-row-txt">
+            <span class="aurora-set-row-title" data-i18n="audioQuality">Resolución de Audio</span>
+            <span class="aurora-set-row-sub" data-i18n="audioQualityDesc">Streaming adaptativo hasta 256 kbps AAC / FLAC sin pérdida.</span>
+          </div>
+          <span class="aurora-set-row-val" id="qualitySelectedLabel">Lossless FLAC</span>
+          <svg class="aurora-set-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
         
         <div class="ytm-dropdown-wrapper" id="qualityDropdownWrap">
-          <button type="button" class="ytm-dropdown-btn" id="qualityDropdownTrigger" onclick="toggleQualityDropdown(event)">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <span class="ytm-dropdown-pill-code" id="qualitySelectedBadge">ULTRA HQ</span>
-              <span class="ytm-dropdown-val" id="qualitySelectedLabel">Lossless FLAC</span>
-            </div>
-            <svg class="ytm-dropdown-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
           <div class="ytm-dropdown-list" id="qualityDropdownMenu"></div>
         </div>
       </div>
 
-      <!-- Section: Terms & Legal Navigation Link -->
-      <div class="settings-card-section" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:38px;height:38px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.22);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            </div>
-            <div>
-              <div style="font-size:14px;font-weight:700;color:#fff;" data-i18n="termsNav">Terms & DMCA</div>
-              <div style="font-size:12px;color:#888;" data-i18n="termsSub">Legal notice, copyright & policies</div>
-            </div>
+      <!-- Section: Términos (fila simple v2.12) -->
+      <div class="settings-card-section" style="padding:6px 16px;">
+        <button type="button" class="aurora-set-row" onclick="navigateToTerms()">
+          <div class="aurora-set-row-ico" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.22);">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
-          <button type="button" class="ytm-btn-pill" onclick="navigateToTerms()" style="padding:9px 18px;font-size:13px;font-weight:700;background:rgba(56,189,248,0.12);color:var(--primary);border:1px solid rgba(56,189,248,0.28);cursor:pointer;border-radius:9999px;display:flex;align-items:center;gap:6px;transition:all 0.2s ease;">
-            <span data-i18n="openTermsPageBtn">Read All (/terms)</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-        </div>
+          <div class="aurora-set-row-txt">
+            <span class="aurora-set-row-title" data-i18n="termsNav">Términos y DMCA</span>
+            <span class="aurora-set-row-sub" data-i18n="termsSub">Aviso legal, derechos de autor y políticas</span>
+          </div>
+          <svg class="aurora-set-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
       </div>
 
-      <!-- Section: Discord Community -->
-      <div class="settings-card-section" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:38px;height:38px;border-radius:10px;background:rgba(88,101,242,0.12);border:1px solid rgba(88,101,242,0.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-              <svg width="21" height="21" viewBox="0 0 24 24" fill="#5865F2"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.028C.533 9.046-.32 13.58.099 18.058a.082.082 0 0 0 .031.056 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.22 14.22 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.128 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.363 1.225 1.993a.076.076 0 0 0 .084.029 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.055c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.029ZM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418Zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418Z"/></svg>
-            </div>
-            <div>
-              <div style="font-size:14px;font-weight:700;color:#fff;" data-i18n="discordNav">Comunidad de Discord</div>
-              <div style="font-size:12px;color:#888;" data-i18n="discordSub">Novedades, peticiones de canciones y soporte en el server oficial</div>
-            </div>
+      <!-- Section: Discord (fila simple v2.12 — en la APK abre la app) -->
+      <div class="settings-card-section" style="padding:6px 16px;">
+        <button type="button" class="aurora-set-row" onclick="openDiscord()">
+          <div class="aurora-set-row-ico" style="background:rgba(88,101,242,0.12);border:1px solid rgba(88,101,242,0.3);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="#5865F2"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.028C.533 9.046-.32 13.58.099 18.058a.082.082 0 0 0 .031.056 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.22 14.22 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.128 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.363 1.225 1.993a.076.076 0 0 0 .084.029 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.055c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.029ZM8.02 15.331c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418Zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418Z"/></svg>
           </div>
-          <button type="button" class="ytm-btn-pill" onclick="window.open('https://discord.gg/pU9ckzwsut','_blank','noopener')" style="padding:9px 18px;font-size:13px;font-weight:700;background:rgba(88,101,242,0.14);color:#8b95ff;border:1px solid rgba(88,101,242,0.35);cursor:pointer;border-radius:9999px;display:flex;align-items:center;gap:6px;transition:all 0.2s ease;">
-            <span data-i18n="discordJoinBtn">Entrar al Discord</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-        </div>
+          <div class="aurora-set-row-txt">
+            <span class="aurora-set-row-title" data-i18n="discordNav">Comunidad de Discord</span>
+            <span class="aurora-set-row-sub" data-i18n="discordSub">Novedades, peticiones de canciones y soporte en el server oficial</span>
+          </div>
+          <svg class="aurora-set-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
       </div>
-      <!-- AURORA-MUSIC v2.3 — Seccion: Obtener la app (solo navegadores) -->
-      <div class="settings-card-section" id="getAppSection" style="padding:14px 16px;display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:38px;height:38px;border-radius:10px;background:rgba(61,220,132,0.1);border:1px solid rgba(61,220,132,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#3ddc84"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5S2 17.33 2 16.5v-7C2 8.67 2.67 8 3.5 8zm17 0c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-7c0-.83.67-1.5 1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.19-.51-.19-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.95 0-1.85.23-2.66.63L7.85.15c-.2-.19-.51-.19-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.74 3.23 6 5.08 6 7h12c0-1.92-.74-3.76-1.97-5.14zM9.5 5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zm5 0c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5z"/></svg>
-            </div>
-            <div>
-              <div style="font-size:14px;font-weight:700;color:#fff;" data-i18n="getAppNav">Obtener la app</div>
-              <div style="font-size:12px;color:#888;" data-i18n="getAppSub">Instala Aurora Music en tu Android &mdash; instalaci&oacute;n directa y segura</div>
-            </div>
+      <!-- AURORA-MUSIC v2.12 — Obtener la app (fila simple, solo navegadores) -->
+      <div class="settings-card-section" id="getAppSection" style="padding:6px 16px;display:none;">
+        <button type="button" class="aurora-set-row" onclick="navigateToApp()">
+          <div class="aurora-set-row-ico" style="background:rgba(61,220,132,0.1);border:1px solid rgba(61,220,132,0.25);">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="#3ddc84"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5S2 17.33 2 16.5v-7C2 8.67 2.67 8 3.5 8zm17 0c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-7c0-.83.67-1.5 1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.19-.51-.19-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.95 0-1.85.23-2.66.63L7.85.15c-.2-.19-.51-.19-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.74 3.23 6 5.08 6 7h12c0-1.92-.74-3.76-1.97-5.14zM9.5 5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zm5 0c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5z"/></svg>
           </div>
-          <button type="button" class="ytm-btn-pill" onclick="navigateToApp()" style="padding:9px 18px;font-size:13px;font-weight:700;background:rgba(61,220,132,0.12);color:#3ddc84;border:1px solid rgba(61,220,132,0.3);cursor:pointer;border-radius:9999px;display:flex;align-items:center;gap:6px;transition:all 0.2s ease;">
-            <span data-i18n="getAppSettingsBtn">Instalar</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-        </div>
+          <div class="aurora-set-row-txt">
+            <span class="aurora-set-row-title" data-i18n="getAppNav">Obtener la app</span>
+            <span class="aurora-set-row-sub" data-i18n="getAppSub">Instala Aurora Music en tu Android &mdash; instalaci&oacute;n directa y segura</span>
+          </div>
+          <svg class="aurora-set-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
       </div>
     </div>
   </div>
@@ -5130,7 +5145,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "Joyas de tu historial",
         trending: "Tendencias globales",
         trendingSub: "Los \u00e9xitos virales del momento",
-        topCatalog: "\u00c9xitos Ultra HQ (R2)",
+        topCatalog: "Lo más escuchado",
         topCatalogSub: "Audio lossless sin compresi\u00f3n",
         recentHistory: "Historial reciente",
         playbackHistory: "Historial de reproducci\u00f3n",
@@ -5145,8 +5160,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "Descargar al dispositivo",
         languageSelect: "Idioma de la interfaz",
         languagesCount: "12 idiomas",
-        audioQuality: "Calidad de audio",
-        audioQualityDesc: "Streaming adaptativo de alta fidelidad hasta 256kbps AAC / Lossless FLAC en R2.",
+        audioQuality: "Resolución de Audio",
+        audioQualityDesc: "Streaming adaptativo hasta 256 kbps AAC / FLAC sin pérdida.",
         qualityHigh: "Alta",
         qualityNormal: "Normal",
         qualityData: "Ahorro",
@@ -5252,6 +5267,19 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "La app de Aurora Music est\u00e1 disponible solo para Android. En iPhone, iPad o computadora, sigue disfrutando de la misma experiencia en la web.",
         appInstalledNote: "Ya tienes Aurora Music instalada \u2014 la est\u00e1s usando ahora mismo.",
         appGithubBtn: "Ver en GitHub",
+        activityLog: "Búsquedas recientes",
+        trendingSearches: "Búsquedas sugeridas",
+        backToAlbums: "Volver a álbumes",
+        likeTitle: "Me gusta",
+        moreOptions: "Más opciones",
+        next: "Siguiente",
+        pause: "Pausar",
+        play: "Reproducir",
+        previous: "Anterior",
+        repeat: "Repetir",
+        searchAndAddSongs: "Busca y añade canciones",
+        shuffle: "Aleatorio",
+        qualityUltra: "Ultra (sin pérdida)",
       },
       en: {
         code: "EN",
@@ -5269,7 +5297,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "Gems from your history",
         trending: "Global Trends",
         trendingSub: "Viral hits right now",
-        topCatalog: "Ultra HQ Hits (R2)",
+        topCatalog: "Most Played",
         topCatalogSub: "Lossless uncompressed audio",
         recentHistory: "Recent History",
         playbackHistory: "Playback History",
@@ -5284,8 +5312,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "Download to device",
         languageSelect: "Interface Language",
         languagesCount: "12 languages",
-        audioQuality: "Audio Quality",
-        audioQualityDesc: "High-fidelity adaptive streaming up to 256kbps AAC / Lossless FLAC on R2.",
+        audioQuality: "Audio Resolution",
+        audioQualityDesc: "Adaptive streaming up to 256 kbps AAC / lossless FLAC.",
         qualityHigh: "High",
         qualityNormal: "Normal",
         qualityData: "Saver",
@@ -5391,6 +5419,19 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "The Aurora Music app is available for Android only. On iPhone, iPad or desktop, keep enjoying the same experience on the web.",
         appInstalledNote: "You already have Aurora Music installed \u2014 you are using it right now.",
         appGithubBtn: "View on GitHub",
+        activityLog: "Recent searches",
+        trendingSearches: "Suggested searches",
+        backToAlbums: "Back to albums",
+        likeTitle: "Like",
+        moreOptions: "More options",
+        next: "Next",
+        pause: "Pause",
+        play: "Play",
+        previous: "Previous",
+        repeat: "Repeat",
+        searchAndAddSongs: "Search and add songs",
+        shuffle: "Shuffle",
+        qualityUltra: "Ultra (lossless)",
       },
       pt: {
         code: "PT",
@@ -5408,7 +5449,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "Joias do seu hist\u00f3rico",
         trending: "Em alta",
         trendingSub: "Sucessos do momento",
-        topCatalog: "\u00c9xitos Ultra HQ (R2)",
+        topCatalog: "Mais Tocadas",
         topCatalogSub: "\u00c1udio lossless sem compress\u00e3o",
         recentHistory: "Hist\u00f3rico recente",
         playbackHistory: "Hist\u00f3rico de reprodu\u00e7\u00e3o",
@@ -5419,8 +5460,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "Baixar no dispositivo",
         languageSelect: "Idioma da interface",
         languagesCount: "12 idiomas",
-        audioQuality: "Qualidade de \u00e1udio",
-        audioQualityDesc: "Streaming adaptativo com acelera\u00e7\u00e3o Ultra HQ at\u00e9 256kbps AAC / FLAC no R2.",
+        audioQuality: "Resolução de Áudio",
+        audioQualityDesc: "Streaming adaptativo até 256 kbps AAC / FLAC sem perdas.",
         qualityHigh: "Alta",
         qualityNormal: "Normal",
         qualityData: "Econ\u00f4mico",
@@ -5501,6 +5542,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "O app do Aurora Music est\u00e1 dispon\u00edvel apenas para Android. No iPhone, iPad ou computador, continue aproveitando a mesma experi\u00eancia na web.",
         appInstalledNote: "Voc\u00ea j\u00e1 tem o Aurora Music instalado \u2014 voc\u00ea est\u00e1 usando ele agora mesmo.",
         appGithubBtn: "Ver no GitHub",
+        activityLog: "Pesquisas recentes",
+        trendingSearches: "Pesquisas sugeridas",
+        backToAlbums: "Voltar aos álbuns",
+        likeTitle: "Curtir",
+        moreOptions: "Mais opções",
+        next: "Próxima",
+        pause: "Pausar",
+        play: "Reproduzir",
+        previous: "Anterior",
+        repeat: "Repetir",
+        searchAndAddSongs: "Pesquise e adicione músicas",
+        shuffle: "Aleatório",
+        qualityUltra: "Ultra (sem perdas)",
+        back: "Voltar",
+        copyLinkBtn: "Copiar",
+        discordNav: "Comunidade do Discord",
+        discordSub: "Novidades, pedidos de músicas e suporte no servidor oficial",
+        languageSelectSub: "Escolha o idioma de toda a interface.",
+        legalAcceptBtn: "Entendido e Aceitar",
+        legalBadgeBerne: "Convenção de Berna",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "Intermediário Técnico (Mero Conduto)",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "Aviso Legal, DMCA e Termos de Serviço",
+        nowPlayingTag: "TOCANDO AGORA",
+        personalCollection: "Coleção pessoal",
+        playNow: "Tocar agora",
+        savedSong: "salva",
+        savedSongs: "salvas",
+        share: "Compartilhar",
+        songsYouLike: "Músicas que você curte",
+        termsNav: "Termos e DMCA",
+        termsSub: "Aviso legal, direitos autorais e políticas",
       },
       fr: {
         code: "FR",
@@ -5518,7 +5592,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "P\u00e9pites de votre historique",
         trending: "Tendances",
         trendingSub: "Les hits du moment",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "Les Plus Écoutées",
         topCatalogSub: "Audio sans perte",
         recentHistory: "Historique r\u00e9cent",
         playbackHistory: "Historique d'\u00e9coute",
@@ -5529,8 +5603,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "T\u00e9l\u00e9charger sur l'appareil",
         languageSelect: "Langue de l'interface",
         languagesCount: "12 langues",
-        audioQuality: "Qualit\u00e9 audio",
-        audioQualityDesc: "Streaming adaptatif FLAC / AAC acc\u00e9l\u00e9r\u00e9 par Ultra HQ.",
+        audioQuality: "Résolution audio",
+        audioQualityDesc: "Streaming adaptatif jusqu'à 256 kbps AAC / FLAC sans perte.",
         qualityHigh: "Haute",
         qualityNormal: "Normale",
         qualityData: "\u00c9conomiseur",
@@ -5611,6 +5685,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "L'appli Aurora Music est disponible uniquement pour Android. Sur iPhone, iPad ou ordinateur, profitez de la m\u00eame exp\u00e9rience sur le web.",
         appInstalledNote: "Vous avez d\u00e9j\u00e0 Aurora Music install\u00e9e \u2014 vous l'utilisez en ce moment m\u00eame.",
         appGithubBtn: "Voir sur GitHub",
+        activityLog: "Recherches récentes",
+        trendingSearches: "Recherches suggérées",
+        backToAlbums: "Retour aux albums",
+        likeTitle: "J'aime",
+        moreOptions: "Plus d'options",
+        next: "Suivant",
+        pause: "Pause",
+        play: "Lecture",
+        previous: "Précédent",
+        repeat: "Répéter",
+        searchAndAddSongs: "Recherchez et ajoutez des titres",
+        shuffle: "Aléatoire",
+        qualityUltra: "Ultra (sans perte)",
+        back: "Retour",
+        copyLinkBtn: "Copier",
+        discordNav: "Communauté Discord",
+        discordSub: "Actualités, demandes de titres et assistance sur le serveur officiel",
+        languageSelectSub: "Choisissez la langue de toute l'interface.",
+        legalAcceptBtn: "Compris et accepter",
+        legalBadgeBerne: "Convention de Berne",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "Intermédiaire technique (simple conduit)",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "Mention légale, DMCA et conditions d'utilisation",
+        nowPlayingTag: "EN LECTURE",
+        personalCollection: "Collection personnelle",
+        playNow: "Lire maintenant",
+        savedSong: "enregistrée",
+        savedSongs: "enregistrées",
+        share: "Partager",
+        songsYouLike: "Titres que vous aimez",
+        termsNav: "Conditions et DMCA",
+        termsSub: "Mention légale, droits d'auteur et politiques",
       },
       de: {
         code: "DE",
@@ -5628,7 +5735,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "Highlights aus deinem Verlauf",
         trending: "Trends",
         trendingSub: "Aktuelle Hits",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "Am Meisten Gehört",
         topCatalogSub: "Lossless Audio ohne Kompression",
         recentHistory: "Verlauf",
         playbackHistory: "Wiedergabeverlauf",
@@ -5639,8 +5746,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "Auf Ger\u00e4t herunterladen",
         languageSelect: "Sprache",
         languagesCount: "12 Sprachen",
-        audioQuality: "Audioqualit\u00e4t",
-        audioQualityDesc: "Ultra HQ Edge Streaming bis zu 256kbps AAC / Lossless FLAC.",
+        audioQuality: "Tonqualität",
+        audioQualityDesc: "Adaptives Streaming bis zu 256 kbps AAC / verlustfreies FLAC.",
         qualityHigh: "Hoch",
         qualityNormal: "Normal",
         qualityData: "Sparmodus",
@@ -5721,6 +5828,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "Die Aurora-Music-App ist nur f\u00fcr Android verf\u00fcgbar. Auf iPhone, iPad oder Desktop genie\u00dfe weiterhin dasselbe Erlebnis im Web.",
         appInstalledNote: "Du hast Aurora Music bereits installiert \u2014 du nutzt sie gerade jetzt.",
         appGithubBtn: "Auf GitHub ansehen",
+        activityLog: "Letzte Suchanfragen",
+        trendingSearches: "Vorgeschlagene Suchanfragen",
+        backToAlbums: "Zurück zu Alben",
+        likeTitle: "Gefällt mir",
+        moreOptions: "Weitere Optionen",
+        next: "Weiter",
+        pause: "Pause",
+        play: "Wiedergabe",
+        previous: "Zurück",
+        repeat: "Wiederholen",
+        searchAndAddSongs: "Suchen und Songs hinzufügen",
+        shuffle: "Zufallswiedergabe",
+        qualityUltra: "Ultra (verlustfrei)",
+        back: "Zurück",
+        copyLinkBtn: "Kopieren",
+        discordNav: "Discord-Community",
+        discordSub: "Neuigkeiten, Songwünsche und Support auf dem offiziellen Server",
+        languageSelectSub: "Wähle die Sprache der gesamten Oberfläche.",
+        legalAcceptBtn: "Verstanden & Akzeptieren",
+        legalBadgeBerne: "Berner Übereinkunft",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "Technischer Vermittler (mere conduit)",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "Rechtshinweis, DMCA & Nutzungsbedingungen",
+        nowPlayingTag: "LÄUFT JETZT",
+        personalCollection: "Persönliche Sammlung",
+        playNow: "Jetzt wiedergeben",
+        savedSong: "gespeichert",
+        savedSongs: "gespeichert",
+        share: "Teilen",
+        songsYouLike: "Songs, die dir gefallen",
+        termsNav: "Nutzungsbedingungen & DMCA",
+        termsSub: "Rechtshinweis, Urheberrecht und Richtlinien",
       },
       it: {
         code: "IT",
@@ -5738,7 +5878,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "Dalla tua cronologia",
         trending: "Tendenze",
         trendingSub: "I successi del momento",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "Più Ascoltate",
         topCatalogSub: "Audio senza perdita di qualit\u00e0",
         recentHistory: "Cronologia recente",
         playbackHistory: "Cronologia di ascolto",
@@ -5749,8 +5889,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "Scarica sul dispositivo",
         languageSelect: "Lingua dell'interfaccia",
         languagesCount: "12 lingue",
-        audioQuality: "Qualit\u00e0 audio",
-        audioQualityDesc: "Streaming FLAC/AAC su Ultra HQ Edge.",
+        audioQuality: "Risoluzione audio",
+        audioQualityDesc: "Streaming adattivo fino a 256 kbps AAC / FLAC senza perdita.",
         qualityHigh: "Alta",
         qualityNormal: "Normale",
         qualityData: "Risparmio",
@@ -5831,6 +5971,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "L'app di Aurora Music \u00e8 disponibile solo per Android. Su iPhone, iPad o computer continua a goderti la stessa esperienza sul web.",
         appInstalledNote: "Hai gi\u00e0 installato Aurora Music \u2014 la stai usando proprio ora.",
         appGithubBtn: "Vedi su GitHub",
+        activityLog: "Ricerche recenti",
+        trendingSearches: "Ricerche suggerite",
+        backToAlbums: "Torna agli album",
+        likeTitle: "Mi piace",
+        moreOptions: "Altre opzioni",
+        next: "Successivo",
+        pause: "Pausa",
+        play: "Riproduci",
+        previous: "Precedente",
+        repeat: "Ripeti",
+        searchAndAddSongs: "Cerca e aggiungi brani",
+        shuffle: "Casuale",
+        qualityUltra: "Ultra (senza perdita)",
+        back: "Indietro",
+        copyLinkBtn: "Copia",
+        discordNav: "Community Discord",
+        discordSub: "Novità, richieste di brani e supporto nel server ufficiale",
+        languageSelectSub: "Scegli la lingua dell'intera interfaccia.",
+        legalAcceptBtn: "Capito e accetto",
+        legalBadgeBerne: "Convenzione di Berna",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "Intermediario tecnico (mero condotto)",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "Avviso legale, DMCA e Termini di servizio",
+        nowPlayingTag: "IN RIPRODUZIONE",
+        personalCollection: "Collezione personale",
+        playNow: "Riproduci ora",
+        savedSong: "salvata",
+        savedSongs: "salvate",
+        share: "Condividi",
+        songsYouLike: "Brani che ti piacciono",
+        termsNav: "Termini e DMCA",
+        termsSub: "Avviso legale, copyright e policy",
       },
       ru: {
         code: "RU",
@@ -5848,7 +6021,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "\u0418\u0437 \u0432\u0430\u0448\u0435\u0439 \u0438\u0441\u0442\u043e\u0440\u0438\u0438",
         trending: "\u0422\u0440\u0435\u043d\u0434\u044b",
         trendingSub: "\u041f\u043e\u043f\u0443\u043b\u044f\u0440\u043d\u044b\u0435 \u0445\u0438\u0442\u044b",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "Самое слушаемое",
         topCatalogSub: "\u0411\u0435\u0437 \u043f\u043e\u0442\u0435\u0440\u0438 \u043a\u0430\u0447\u0435\u0441\u0442\u0432\u0430",
         recentHistory: "\u041d\u0435\u0434\u0430\u0432\u043d\u043e\u0435",
         playbackHistory: "\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u043f\u0440\u043e\u0441\u043b\u0443\u0448\u0438\u0432\u0430\u043d\u0438\u0439",
@@ -5859,8 +6032,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "\u0421\u043a\u0430\u0447\u0430\u0442\u044c \u043d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u043e",
         languageSelect: "\u042f\u0437\u044b\u043a \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430",
         languagesCount: "12 \u044f\u0437\u044b\u043a\u043e\u0432",
-        audioQuality: "\u041a\u0430\u0447\u0435\u0441\u0442\u0432\u043e \u0437\u0432\u0443\u043a\u0430",
-        audioQualityDesc: "\u0421\u0442\u0440\u0438\u043c\u0438\u043d\u0433 FLAC / 256kbps AAC \u0447\u0435\u0440\u0435\u0437 Ultra HQ Edge.",
+        audioQuality: "Качество звука",
+        audioQualityDesc: "Адаптивная трансляция до 256 кбит/с AAC / FLAC без потерь.",
         qualityHigh: "\u0412\u044b\u0441\u043e\u043a\u043e\u0435",
         qualityNormal: "\u041e\u0431\u044b\u0447\u043d\u043e\u0435",
         qualityData: "\u042d\u043a\u043e\u043d\u043e\u043c\u0438\u044f",
@@ -5941,6 +6114,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "\u041f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435 Aurora Music \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0434\u043b\u044f Android. \u041d\u0430 iPhone, iPad \u0438\u043b\u0438 \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440\u0435 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0439\u0442\u0435 \u043d\u0430\u0441\u043b\u0430\u0436\u0434\u0430\u0442\u044c\u0441\u044f \u0442\u0435\u043c \u0436\u0435 \u043e\u043f\u044b\u0442\u043e\u043c \u0432 \u0432\u0435\u0431-\u0432\u0435\u0440\u0441\u0438\u0438.",
         appInstalledNote: "Aurora Music \u0443\u0436\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u2014 \u0432\u044b \u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0435\u0441\u044c \u0438\u043c \u043f\u0440\u044f\u043c\u043e \u0441\u0435\u0439\u0447\u0430\u0441.",
         appGithubBtn: "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043d\u0430 GitHub",
+        activityLog: "Недавние запросы",
+        trendingSearches: "Подсказки поиска",
+        backToAlbums: "Назад к альбомам",
+        likeTitle: "Нравится",
+        moreOptions: "Ещё",
+        next: "Далее",
+        pause: "Пауза",
+        play: "Воспроизвести",
+        previous: "Назад",
+        repeat: "Повтор",
+        searchAndAddSongs: "Найдите и добавьте песни",
+        shuffle: "Перемешать",
+        qualityUltra: "Ultra (без потерь)",
+        back: "Назад",
+        copyLinkBtn: "Копировать",
+        discordNav: "Сообщество Discord",
+        discordSub: "Новости, заявки песен и поддержка на официальном сервере",
+        languageSelectSub: "Выберите язык интерфейса.",
+        legalAcceptBtn: "Понятно, принять",
+        legalBadgeBerne: "Бернская конвенция",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "Технический посредник",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "Правовая информация, DMCA и Условия использования",
+        nowPlayingTag: "СЕЙЧАС ИГРАЕТ",
+        personalCollection: "Личная коллекция",
+        playNow: "Слушать сейчас",
+        savedSong: "сохранена",
+        savedSongs: "сохранены",
+        share: "Поделиться",
+        songsYouLike: "Понравившиеся песни",
+        termsNav: "Условия и DMCA",
+        termsSub: "Правовая информация, авторские права и политика",
       },
       ja: {
         code: "JA",
@@ -5958,7 +6164,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "\u5c65\u6b74\u304b\u3089\u304a\u3059\u3059\u3081",
         trending: "\u6025\u4e0a\u6607",
         trendingSub: "\u4eca\u8a71\u984c\u306e\u66f2",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "最も聴いている曲",
         topCatalogSub: "\u30ed\u30b9\u30ec\u30b9\u97f3\u6e90",
         recentHistory: "\u6700\u8fd1\u306e\u5c65\u6b74",
         playbackHistory: "\u518d\u751f\u5c65\u6b74",
@@ -5969,8 +6175,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "\u7aef\u672b\u306b\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9",
         languageSelect: "\u8a00\u8a9e\u8a2d\u5b9a",
         languagesCount: "12\u8a00\u8a9e",
-        audioQuality: "\u97f3\u8cea",
-        audioQualityDesc: "Ultra HQ Edge FLAC / AAC\u9ad8\u97f3\u8cea\u30b9\u30c8\u30ea\u30fc\u30df\u30f3\u30b0",
+        audioQuality: "音質",
+        audioQualityDesc: "最大256kbps AAC / ロスレスFLACのアダプティブストリーミング。",
         qualityHigh: "\u9ad8",
         qualityNormal: "\u6a19\u6e96",
         qualityData: "\u7bc0\u7d04",
@@ -6051,6 +6257,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "Aurora Music \u30a2\u30d7\u30ea\u306f Android \u5c02\u7528\u3067\u3059\u3002iPhone\u30fbiPad\u30fbPC \u3067\u306f\u3001\u30a6\u30a7\u30d6\u7248\u3067\u540c\u3058\u4f53\u9a13\u3092\u304a\u697d\u3057\u307f\u304f\u3060\u3055\u3044\u3002",
         appInstalledNote: "Aurora Music \u306f\u3059\u3067\u306b\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u6e08\u307f\u3067\u3059 \u2014 \u4eca\u307e\u3055\u306b\u4f7f\u3063\u3066\u3044\u307e\u3059\u3002",
         appGithubBtn: "GitHub \u3067\u898b\u308b",
+        activityLog: "最近の検索",
+        trendingSearches: "おすすめの検索",
+        backToAlbums: "アルバムに戻る",
+        likeTitle: "いいね",
+        moreOptions: "その他のオプション",
+        next: "次へ",
+        pause: "一時停止",
+        play: "再生",
+        previous: "前へ",
+        repeat: "リピート",
+        searchAndAddSongs: "曲を検索して追加",
+        shuffle: "シャッフル",
+        qualityUltra: "Ultra（ロスレス）",
+        back: "戻る",
+        copyLinkBtn: "コピー",
+        discordNav: "Discordコミュニティ",
+        discordSub: "最新情報、リクエスト、公式サーバーでのサポート",
+        languageSelectSub: "インターフェース全体の言語を選択。",
+        legalAcceptBtn: "了解して同意",
+        legalBadgeBerne: "ベルヌ条約",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "技術的仲介者（単なる伝送）",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "法的通知、DMCAおよび利用規約",
+        nowPlayingTag: "再生中",
+        personalCollection: "個人コレクション",
+        playNow: "今すぐ再生",
+        savedSong: "保存しました",
+        savedSongs: "保存済み",
+        share: "共有",
+        songsYouLike: "お気に入りの曲",
+        termsNav: "利用規約とDMCA",
+        termsSub: "法的通知、著作権およびポリシー",
       },
       ko: {
         code: "KO",
@@ -6068,7 +6307,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "\ud788\uc2a4\ud1a0\ub9ac \uae30\ubc18",
         trending: "\uc778\uae30 \uae09\uc0c1\uc2b9",
         trendingSub: "\ud604\uc7ac \ud56b\ud55c \ub178\ub798",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "가장 많이 듣는 곡",
         topCatalogSub: "\ubb34\uc190\uc2e4 \uc74c\uc6d0",
         recentHistory: "\ucd5c\uadfc \uae30\ub85d",
         playbackHistory: "\uc7ac\uc0dd \uae30\ub85d",
@@ -6079,8 +6318,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "\uae30\uae30\uc5d0 \ub2e4\uc6b4\ub85c\ub4dc",
         languageSelect: "\uc5b8\uc5b4 \uc124\uc815",
         languagesCount: "12\uac1c \uc5b8\uc5b4",
-        audioQuality: "\uc74c\uc9c8",
-        audioQualityDesc: "Ultra HQ Edge FLAC / 256kbps AAC \uace0\uc74c\uc9c8 \uc2a4\ud2b8\ub9ac\ubc0d",
+        audioQuality: "음질",
+        audioQualityDesc: "최대 256kbps AAC / 무손실 FLAC 적응형 스트리밍.",
         qualityHigh: "\ub192\uc74c",
         qualityNormal: "\ubcf4\ud1b5",
         qualityData: "\uc808\uc57d",
@@ -6161,6 +6400,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "Aurora Music \uc571\uc740 Android \uc804\uc6a9\uc785\ub2c8\ub2e4. iPhone, iPad, PC\uc5d0\uc11c\ub294 \uc6f9\uc5d0\uc11c \ub3d9\uc77c\ud55c \uacbd\ud5d8\uc744 \uc990\uae30\uc138\uc694.",
         appInstalledNote: "\uc774\ubbf8 Aurora Music\uc774 \uc124\uce58\ub418\uc5b4 \uc788\uc5b4\uc694 \u2014 \uc9c0\uae08 \ubc14\ub85c \uc0ac\uc6a9 \uc911\uc774\uc2dc\ub124\uc694.",
         appGithubBtn: "GitHub\uc5d0\uc11c \ubcf4\uae30",
+        activityLog: "최근 검색어",
+        trendingSearches: "추천 검색어",
+        backToAlbums: "앨범으로 돌아가기",
+        likeTitle: "좋아요",
+        moreOptions: "더보기",
+        next: "다음",
+        pause: "일시정지",
+        play: "재생",
+        previous: "이전",
+        repeat: "반복",
+        searchAndAddSongs: "노래를 검색해 추가하세요",
+        shuffle: "셔플",
+        qualityUltra: "울트라 (무손실)",
+        back: "뒤로",
+        copyLinkBtn: "복사",
+        discordNav: "Discord 커뮤니티",
+        discordSub: "공식 서버에서 소식, 신청 및 지원",
+        languageSelectSub: "전체 인터페이스 언어를 선택하세요.",
+        legalAcceptBtn: "확인 및 동의",
+        legalBadgeBerne: "베른 협약",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "기술적 중개자",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "법적 고지, DMCA 및 서비스 약관",
+        nowPlayingTag: "재생 중",
+        personalCollection: "개인 컬렉션",
+        playNow: "지금 재생",
+        savedSong: "저장됨",
+        savedSongs: "저장됨",
+        share: "공유",
+        songsYouLike: "좋아하는 곡",
+        termsNav: "약관 및 DMCA",
+        termsSub: "법적 고지, 저작권 및 정책",
       },
       zh: {
         code: "ZH",
@@ -6178,7 +6450,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "\u57fa\u4e8e\u5386\u53f2\u63a8\u8350",
         trending: "\u6392\u884c\u699c",
         trendingSub: "\u70ed\u95e8\u6b4c\u66f2",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "最多播放",
         topCatalogSub: "\u65e0\u635f\u97f3\u8d28",
         recentHistory: "\u6700\u8fd1\u64ad\u653e",
         playbackHistory: "\u64ad\u653e\u5386\u53f2",
@@ -6189,8 +6461,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "\u4e0b\u8f7d\u5230\u8bbe\u5907",
         languageSelect: "\u754c\u9762\u8bed\u8a00",
         languagesCount: "12\u79cd\u8bed\u8a00",
-        audioQuality: "\u97f3\u8d28",
-        audioQualityDesc: "Ultra HQ Edge FLAC / 256kbps AAC\u9ad8\u6e05\u6d41\u5a92\u4f53",
+        audioQuality: "音质",
+        audioQualityDesc: "自适应流媒体，最高 256kbps AAC / 无损 FLAC。",
         qualityHigh: "\u9ad8",
         qualityNormal: "\u6807\u51c6",
         qualityData: "\u7701\u6d41\u91cf",
@@ -6271,6 +6543,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "Aurora Music \u5e94\u7528\u4ec5\u652f\u6301 Android\u3002iPhone\u3001iPad \u6216\u7535\u8111\u4e0a\u8bf7\u7ee7\u7eed\u4f7f\u7528\u7f51\u9875\u7248\uff0c\u4f53\u9a8c\u5b8c\u5168\u76f8\u540c\u3002",
         appInstalledNote: "\u4f60\u5df2\u5b89\u88c5 Aurora Music \u2014 \u73b0\u5728\u6b63\u5728\u4f7f\u7528\u4e2d\u3002",
         appGithubBtn: "\u5728 GitHub \u4e0a\u67e5\u770b",
+        activityLog: "最近搜索",
+        trendingSearches: "推荐搜索",
+        backToAlbums: "返回专辑",
+        likeTitle: "喜欢",
+        moreOptions: "更多选项",
+        next: "下一首",
+        pause: "暂停",
+        play: "播放",
+        previous: "上一首",
+        repeat: "循环播放",
+        searchAndAddSongs: "搜索并添加歌曲",
+        shuffle: "随机播放",
+        qualityUltra: "Ultra（无损）",
+        back: "返回",
+        copyLinkBtn: "复制",
+        discordNav: "Discord 社区",
+        discordSub: "官方服务器中的动态、点歌与支持",
+        languageSelectSub: "选择整个界面的语言。",
+        legalAcceptBtn: "已知悉并接受",
+        legalBadgeBerne: "伯尔尼公约",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "技术中介（单纯传输）",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "法律声明、DMCA 与服务条款",
+        nowPlayingTag: "正在播放",
+        personalCollection: "个人收藏",
+        playNow: "立即播放",
+        savedSong: "已收藏",
+        savedSongs: "已收藏",
+        share: "分享",
+        songsYouLike: "你喜欢的歌曲",
+        termsNav: "条款与 DMCA",
+        termsSub: "法律声明、版权与政策",
       },
       ar: {
         code: "AR",
@@ -6288,7 +6593,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "\u0645\u0646 \u0633\u062c\u0644\u0643",
         trending: "\u0627\u0644\u0631\u0627\u0626\u062c",
         trendingSub: "\u0623\u0641\u0636\u0644 \u0627\u0644\u0623\u063a\u0627\u0646\u064a",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "الأكثر استماعًا",
         topCatalogSub: "\u0635\u0648\u062a \u0639\u0627\u0644\u064a \u0627\u0644\u062f\u0642\u0629",
         recentHistory: "\u0627\u0644\u0633\u062c\u0644 \u0627\u0644\u0623\u062e\u064a\u0631",
         playbackHistory: "\u0633\u062c\u0644 \u0627\u0644\u062a\u0634\u063a\u064a\u0644",
@@ -6299,8 +6604,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "\u062a\u062d\u0645\u064a\u0644 \u0639\u0644\u0649 \u0627\u0644\u062c\u0647\u0627\u0632",
         languageSelect: "\u0644\u063a\u0629 \u0627\u0644\u0648\u0627\u062c\u0647\u0629",
         languagesCount: "12 \u0644\u063a\u0629",
-        audioQuality: "\u062c\u0648\u062f\u0629 \u0627\u0644\u0635\u0648\u062a",
-        audioQualityDesc: "\u0628\u062b \u0641\u0627\u0626\u0642 \u0627\u0644\u062c\u0648\u062f\u0629 \u0639\u0628\u0631 Ultra HQ Edge",
+        audioQuality: "جودة الصوت",
+        audioQualityDesc: "بث تكيفي حتى 256 كيلوبت AAC / FLAC بدون فقدان.",
         qualityHigh: "\u0639\u0627\u0644\u064a\u0629",
         qualityNormal: "\u0639\u0627\u062f\u064a\u0629",
         qualityData: "\u062a\u0648\u0641\u064a\u0631",
@@ -6381,6 +6686,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "\u062a\u0637\u0628\u064a\u0642 Aurora Music \u0645\u062a\u0627\u062d \u0644\u0623\u0646\u062f\u0631\u0648\u064a\u062f \u0641\u0642\u0637. \u0639\u0644\u0649 iPhone \u0623\u0648 iPad \u0623\u0648 \u0627\u0644\u0643\u0645\u0628\u064a\u0648\u062a\u0631\u060c \u0627\u0633\u062a\u0645\u062a\u0639 \u0628\u0646\u0641\u0633 \u0627\u0644\u062a\u062c\u0631\u0628\u0629 \u0639\u0628\u0631 \u0627\u0644\u0648\u064a\u0628.",
         appInstalledNote: "\u0644\u062f\u064a\u0643 Aurora Music \u0645\u062b\u0628\u0651\u062a \u0628\u0627\u0644\u0641\u0639\u0644 \u2014 \u0623\u0646\u062a \u062a\u0633\u062a\u062e\u062f\u0645\u0647 \u0627\u0644\u0622\u0646.",
         appGithubBtn: "\u0639\u0631\u0636 \u0639\u0644\u0649 GitHub",
+        activityLog: "عمليات البحث الأخيرة",
+        trendingSearches: "عمليات بحث مقترحة",
+        backToAlbums: "العودة إلى الألبومات",
+        likeTitle: "إعجاب",
+        moreOptions: "خيارات أخرى",
+        next: "التالي",
+        pause: "إيقاف مؤقت",
+        play: "تشغيل",
+        previous: "السابق",
+        repeat: "تكرار",
+        searchAndAddSongs: "ابحث وأضف أغاني",
+        shuffle: "عشوائي",
+        qualityUltra: "Ultra (بدون فقدان)",
+        back: "رجوع",
+        copyLinkBtn: "نسخ",
+        discordNav: "مجتمع Discord",
+        discordSub: "أخبار وطلبات الأغاني والدعم في السيرفر الرسمي",
+        languageSelectSub: "اختر لغة الواجهة بالكامل.",
+        legalAcceptBtn: "مفهوم وقبول",
+        legalBadgeBerne: "اتفاقية برن",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "وسيط تقني",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "إشعار قانوني، DMCA وشروط الخدمة",
+        nowPlayingTag: "قيد التشغيل",
+        personalCollection: "المجموعة الشخصية",
+        playNow: "تشغيل الآن",
+        savedSong: "محفوظة",
+        savedSongs: "محفوظة",
+        share: "مشاركة",
+        songsYouLike: "الأغاني التي تعجبك",
+        termsNav: "الشروط وDMCA",
+        termsSub: "إشعار قانوني، حقوق النشر والسياسات",
       },
       hi: {
         code: "HI",
@@ -6398,7 +6736,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         recommendedMixSub: "\u0907\u0924\u093f\u0939\u093e\u0938 \u0938\u0947",
         trending: "\u091f\u094d\u0930\u0947\u0902\u0921\u093f\u0902\u0917",
         trendingSub: "\u0932\u094b\u0915\u092a\u094d\u0930\u093f\u092f \u0917\u093e\u0928\u0947",
-        topCatalog: "Ultra HQ (R2)",
+        topCatalog: "सबसे ज़्यादा सुनी गई",
         topCatalogSub: "\u0932\u0949\u0938\u0932\u0947\u0938 \u0911\u0921\u093f\u092f\u094b",
         recentHistory: "\u0939\u093e\u0932\u093f\u092f\u093e \u0907\u0924\u093f\u0939\u093e\u0938",
         playbackHistory: "\u0917\u093e\u0928\u094b\u0902 \u0915\u093e \u0907\u0924\u093f\u0939\u093e\u0938",
@@ -6409,8 +6747,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         downloadDevice: "\u0921\u093f\u0935\u093e\u0907\u0938 \u092a\u0930 \u0921\u093e\u0909\u0928\u0932\u094b\u0921 \u0915\u0930\u0947\u0902",
         languageSelect: "\u092d\u093e\u0937\u093e",
         languagesCount: "12 \u092d\u093e\u0937\u093e\u090f\u0902",
-        audioQuality: "\u0911\u0921\u093f\u092f\u094b \u0917\u0941\u0923\u0935\u0924\u094d\u0924\u093e",
-        audioQualityDesc: "Ultra HQ Edge FLAC / 256kbps AAC \u0938\u094d\u091f\u094d\u0930\u0940\u092e\u093f\u0902\u0917",
+        audioQuality: "ऑडियो गुणवत्ता",
+        audioQualityDesc: "अनुकूली स्ट्रीमिंग 256 kbps AAC / लॉसलेस FLAC तक।",
         qualityHigh: "\u0909\u091a\u094d\u091a",
         qualityNormal: "\u0938\u093e\u092e\u093e\u0928\u094d\u092f",
         qualityData: "\u092c\u091a\u0924",
@@ -6491,6 +6829,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         appOtherPlatformNote: "Aurora Music \u0910\u092a \u0915\u0947\u0935\u0932 Android \u0915\u0947 \u0932\u093f\u090f \u0909\u092a\u0932\u092c\u094d\u0927 \u0939\u0948\u0964 iPhone, iPad \u092f\u093e \u0915\u0902\u092a\u094d\u092f\u0942\u091f\u0930 \u092a\u0930 \u0935\u0947\u092c \u092a\u0930 \u0935\u0939\u0940 \u0905\u0928\u0941\u092d\u0935 \u0932\u0947\u0924\u0947 \u0930\u0939\u0947\u0902\u0964",
         appInstalledNote: "Aurora Music \u092a\u0939\u0932\u0947 \u0938\u0947 \u0907\u0902\u0938\u094d\u091f\u0949\u0932 \u0939\u0948 \u2014 \u0906\u092a \u0905\u092d\u0940 \u0907\u0938\u0940 \u0915\u093e \u0909\u092a\u092f\u094b\u0917 \u0915\u0930 \u0930\u0939\u0947 \u0939\u0948\u0902\u0964",
         appGithubBtn: "GitHub \u092a\u0930 \u0926\u0947\u0916\u0947\u0902",
+        activityLog: "हाल की खोजें",
+        trendingSearches: "सुझाई गई खोजें",
+        backToAlbums: "एल्बम पर वापस जाएँ",
+        likeTitle: "पसंद",
+        moreOptions: "अधिक विकल्प",
+        next: "अगला",
+        pause: "रोकें",
+        play: "चलाएँ",
+        previous: "पिछला",
+        repeat: "दोहराएँ",
+        searchAndAddSongs: "गाने खोजें और जोड़ें",
+        shuffle: "शफ़ल",
+        qualityUltra: "अल्ट्रा (लॉसलेस)",
+        back: "वापस",
+        copyLinkBtn: "कॉपी",
+        discordNav: "Discord समुदाय",
+        discordSub: "आधिकारिक सर्वर पर अपडेट, गानों के अनुरोध और सहायता",
+        languageSelectSub: "पूरे इंटरफ़ेस की भाषा चुनें।",
+        legalAcceptBtn: "समझ गया और स्वीकार करें",
+        legalBadgeBerne: "बर्न कन्वेंशन",
+        legalBadgeEU: "Directive (EU) 2019/790",
+        legalBadgeMereConduit: "तकनीकी मध्यस्थ",
+        legalBadgeSafeHarbor: "DMCA Safe Harbor 17 U.S.C. § 512",
+        legalModalTitle: "कानूनी सूचना, DMCA और सेवा की शर्तें",
+        nowPlayingTag: "बज रहा है",
+        personalCollection: "व्यक्तिगत संग्रह",
+        playNow: "अभी चलाएँ",
+        savedSong: "सहेजा गया",
+        savedSongs: "सहेजे गए",
+        share: "साझा करें",
+        songsYouLike: "आपको पसंद गाने",
+        termsNav: "शर्तें और DMCA",
+        termsSub: "कानूनी सूचना, कॉपीराइट और नीतियाँ",
       }
     };
 
@@ -6623,7 +6994,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     }
 
     const QUALITY_OPTIONS = [
-      { key: 'ultra', badge: 'ULTRA HQ', label: 'Lossless FLAC (R2)' },
+      { key: 'ultra', badge: 'ULTRA', label: 'Lossless FLAC' },
       { key: 'high', badge: 'HIGH', label: '320 kbps AAC' },
       { key: 'normal', badge: 'NORMAL', label: '160 kbps' },
       { key: 'data', badge: 'SAVER', label: '96 kbps' }
@@ -6638,7 +7009,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         const isActive = curQ === opt.key;
         const div = document.createElement('div');
         div.className = 'ytm-dropdown-item' + (isActive ? ' active' : '');
-        const localizedTitle = opt.key === 'high' ? (t('qualityHigh') || 'High') :
+        const localizedTitle = opt.key === 'ultra' ? (t('qualityUltra') || 'Ultra') :
+                               opt.key === 'high' ? (t('qualityHigh') || 'High') :
                                opt.key === 'normal' ? (t('qualityNormal') || 'Normal') :
                                opt.key === 'data' ? (t('qualityData') || 'Saver') : opt.badge;
         div.innerHTML = \`
@@ -7692,7 +8064,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         const mCover = $('modalCover');
         const mTitle = $('modalTitle');
         const mArtist = $('modalArtist');
-        if (mCover) mCover.src = currentTrack.thumb || \`https://i.ytimg.com/vi/\${currentTrack.id}/hqdefault.jpg\`;
+        if (mCover) mCover.src = currentTrack.thumb || \`https://i.ytimg.com/vi/\${currentTrack.id}/mqdefault.jpg\`;
         if (mTitle) mTitle.textContent = currentTrack.title;
         if (mArtist) mArtist.textContent = currentTrack.artist;
         updateLikeButtonState(currentTrack.id);
@@ -7903,7 +8275,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       // Update bottom player bar
       if (pTitle) pTitle.textContent = track.title;
       if (pArtist) pArtist.textContent = track.artist;
-      if (pCover) pCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
+      if (pCover) pCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg\`;
       const pBar = $('playerBar');
       if (pBar) pBar.classList.add('visible', 'active');
 
@@ -7913,7 +8285,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       const mCover = $('modalCover');
       if (mTitle) mTitle.textContent = track.title;
       if (mArtist) mArtist.textContent = track.artist;
-      if (mCover) mCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
+      if (mCover) mCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg\`;
 
       // AURORA-MUSIC v2.9: si el track traia miniatura de video, actualizar
       // reproductor + notificacion con la caratula oficial cuando llegue
@@ -8790,13 +9162,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         row.innerHTML = \`
           <div class="track-row-index">\${idx + 1}</div>
           <div class="track-row-thumb-wrap">
-            <img class="track-row-thumb" src="\${track.thumb || 'https://i.ytimg.com/vi/' + track.id + '/hqdefault.jpg'}" loading="lazy" alt="Cover">
+            <img class="track-row-thumb" src="\${track.thumb || 'https://i.ytimg.com/vi/' + track.id + '/mqdefault.jpg'}" loading="lazy" alt="Cover">
             <div class="track-row-play">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             </div>
           </div>
           <div class="track-row-info">
-            <div class="track-row-title">\${track.title}\${track.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
+            <div class="track-row-title">\${track.title}</div>
             <div class="track-row-artist">\${track.artist}</div>
           </div>
           <div class="track-row-duration">\${formatDuration(track.duration || 0)}</div>
@@ -8850,7 +9222,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       const artist = $('menuTrackArtist');
       const likeText = $('menuLikeText');
 
-      if (thumb) thumb.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
+      if (thumb) thumb.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg\`;
       if (thumb) AURORA_ART.want(thumb, track);
       if (title) title.textContent = track.title || '-';
       if (artist) artist.textContent = track.artist || '-';
@@ -8893,7 +9265,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       const thumbEl = $('menuTrackThumb') || $('menuTrackCover');
       if (titleEl) titleEl.textContent = track.title;
       if (artistEl) artistEl.textContent = track.artist;
-      if (thumbEl) thumbEl.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
+      if (thumbEl) thumbEl.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg\`;
       
       const likeText = $('menuLikeText');
       if (likeText) {
@@ -9063,6 +9435,39 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     window.navigateToHome = navigateToHome;
     window.navigateToApp = navigateToApp;
     window.toggleLangDropdown = toggleLangDropdown;
+    // v2.12 — Discord: en la APK abre la APP de Discord (intent), no el
+    // navegador. En navegadores normales abre la web como siempre. Si en
+    // 1.2s el intent no abrio nada, cae al enlace web como antes.
+    function openDiscord() {
+      var url = 'https://discord.gg/pU9ckzwsut';
+      var inNative = false;
+      try {
+        if (typeof window.AndroidBridge !== 'undefined' && !!window.AndroidBridge) inNative = true;
+        if (/AuroraMusicNativeApp/i.test(navigator.userAgent || '')) inNative = true;
+      } catch (_) {}
+      if (!inNative) {
+        window.open(url, '_blank', 'noopener');
+        return;
+      }
+      try {
+        var opened = false;
+        var mark = function() { opened = true; };
+        document.addEventListener('visibilitychange', mark, { once: true });
+        window.addEventListener('pagehide', mark, { once: true });
+        var f = document.createElement('iframe');
+        f.style.display = 'none';
+        f.src = 'intent://discord.gg/pU9ckzwsut#Intent;package=com.discord;scheme=https;S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
+        document.body.appendChild(f);
+        setTimeout(function() {
+          try { f.remove(); } catch (_) {}
+          if (!opened && document.visibilityState === 'visible') window.location.href = url;
+        }, 1200);
+      } catch (_) {
+        window.location.href = url;
+      }
+    }
+    window.openDiscord = openDiscord;
+
     window.toggleQualityDropdown = toggleQualityDropdown;
     window.selectLanguageOption = selectLanguageOption;
     window.selectAudioQualityOption = selectAudioQualityOption;
@@ -9102,6 +9507,14 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         try {
           if (!target || !track) return;
           if (typeof target === 'object' && !target.parentNode) return;
+          // v2.12 — la miniatura 4:3 (hqdefault/sddefault/sqdefault) trae
+          // bandas negras arriba y abajo: re-escribir a la 16:9 limpia
+          // (mqdefault) para que el recorte cuadrado salga igual que las
+          // portadas oficiales. GLOBAL para todo lo ya guardado.
+          if (target && target.tagName === 'IMG' && target.src) {
+            var _ns = String(target.src).replace('/hqdefault.jpg', '/mqdefault.jpg').replace('/sddefault.jpg', '/mqdefault.jpg').replace('/sqdefault.jpg', '/mqdefault.jpg');
+            if (_ns !== target.src) target.src = _ns;
+          }
           if (String(track.thumb || '').indexOf('i.ytimg.com') === -1) return;
           const a = String(track.artist || '').trim();
           const tt = String(track.title || '').trim();
@@ -9181,13 +9594,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         card.className = 'ytm-quick-card';
         card.innerHTML = \`
           <div class="ytm-quick-thumb-box">
-            <img class="ytm-quick-thumb" src="\${t.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${t.id}/hqdefault.jpg'">
+            <img class="ytm-quick-thumb" src="\${t.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${t.id}/mqdefault.jpg'">
             <div class="ytm-quick-play-btn" title="Reproducir">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
             </div>
           </div>
           <div class="ytm-quick-info">
-            <div class="ytm-quick-title">\${t.title}\${t.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
+            <div class="ytm-quick-title">\${t.title}</div>
             <div class="ytm-quick-artist">\${t.artist}</div>
           </div>
           <button class="ytm-quick-opt-btn" title="M\u00e1s opciones">
@@ -9250,12 +9663,12 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           card.className = 'card';
           card.innerHTML = \`
             <div class="card-thumb-wrap">
-              <img class="card-thumb" src="\${track.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg'">
+              <img class="card-thumb" src="\${track.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg'">
               <div class="card-play-overlay">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               </div>
             </div>
-            <div class="card-title">\${track.title}\${track.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
+            <div class="card-title">\${track.title}</div>
             <div class="card-artist">\${track.artist}</div>
           \`;
           card.onclick = () => playTrack(track, null, false, false);
@@ -9279,14 +9692,14 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         card.className = 'ytm-quick-card';
         card.innerHTML = \`
           <div class="ytm-quick-thumb-box">
-            <img class="ytm-quick-thumb" src="\${track.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg'">
+            <img class="ytm-quick-thumb" src="\${track.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg'">
             <div class="card-rank-badge \${rankClass}">#\${rank}</div>
             <div class="ytm-quick-play-btn" title="Reproducir">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
             </div>
           </div>
           <div class="ytm-quick-info">
-            <div class="ytm-quick-title">\${track.title}\${track.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
+            <div class="ytm-quick-title">\${track.title}</div>
             <div class="ytm-quick-artist">\${track.artist}</div>
           </div>
           <button class="ytm-quick-opt-btn" title="Más opciones">
@@ -9318,14 +9731,14 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         card.className = 'ytm-quick-card';
         card.innerHTML = \`
           <div class="ytm-quick-thumb-box">
-            <img class="ytm-quick-thumb" src="\${track.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg'">
+            <img class="ytm-quick-thumb" src="\${track.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg'">
             <div class="card-rank-badge \${rankClass}">#\${rank}</div>
             <div class="ytm-quick-play-btn" title="Reproducir">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
             </div>
           </div>
           <div class="ytm-quick-info">
-            <div class="ytm-quick-title">\${track.title}\${track.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
+            <div class="ytm-quick-title">\${track.title}</div>
             <div class="ytm-quick-artist">\${track.artist}</div>
           </div>
           <button class="ytm-quick-opt-btn" title="Más opciones">
@@ -9355,7 +9768,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       currentTrack = track;
       if (pTitle) pTitle.textContent = track.title;
       if (pArtist) pArtist.textContent = track.artist;
-      if (pCover) pCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
+      if (pCover) pCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/mqdefault.jpg\`;
       if (pCover) AURORA_ART.want(pCover, track);
       const pBar = $('playerBar');
       if (pBar) pBar.classList.add('visible', 'active');
@@ -9498,13 +9911,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
               card.className = 'ytm-quick-card';
               card.innerHTML = \`
                 <div class="ytm-quick-thumb-box">
-                  <img class="ytm-quick-thumb" src="\${t.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${t.id}/hqdefault.jpg'">
+                  <img class="ytm-quick-thumb" src="\${t.thumb}" loading="lazy" alt="Cover" onerror="this.src='https://i.ytimg.com/vi/\${t.id}/mqdefault.jpg'">
                   <div class="ytm-quick-play-btn" title="Reproducir">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
                   </div>
                 </div>
                 <div class="ytm-quick-info">
-                  <div class="ytm-quick-title">\${t.title}\${t.r2Ready ? '<span class="r2-badge">HQ R2</span>' : ''}</div>
+                  <div class="ytm-quick-title">\${t.title}</div>
                   <div class="ytm-quick-artist">\${t.artist}</div>
                 </div>
                 <button class="ytm-quick-opt-btn" title="Más opciones">
@@ -9542,7 +9955,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       const vid = urlParams.get('v');
       if (vid && vid.length === 11) {
         // Load into player in PAUSED state (DO NOT AUTOPLAY!)
-        prepareTrackInPlayer({ id: vid, title: 'Canci\u00f3n', artist: 'YouTube Music', thumb: \`https://i.ytimg.com/vi/\${vid}/hqdefault.jpg\`, duration: 210 });
+        prepareTrackInPlayer({ id: vid, title: 'Canci\u00f3n', artist: 'YouTube Music', thumb: \`https://i.ytimg.com/vi/\${vid}/mqdefault.jpg\`, duration: 210 });
         try { window.history.replaceState({}, '', window.location.pathname); } catch (_) {}
       }
     }
