@@ -751,19 +751,28 @@ function formatDuration(sec) {
 // Curated home collections (D1 Database + Cloudflare R2 + Fast Curated Trending)
 
 // ------------------------------------------------------------
-// AURORA-MUSIC v2.9 — Portadas oficiales (caratula original del
-// single/album via iTunes, fallback Deezer) para todas las canciones.
-// Reemplaza miniaturas de video (marcas VEVO, fotogramas, barras) por
-// la portada real. Matching ESTRICTO titulo+artista: sin match
-// confiable se conserva la miniatura de YouTube (sin regression).
-// Cache: memoria por isolato + D1 art_cache (hits perpetuos,
-// fallos re-intentables a los 3 dias). Presupuesto de upstream
-// por peticion para respetar los limites de la API.
+// AURORA-MUSIC v2.10 — Portadas oficiales UNIVERSALES para TODAS las
+// canciones (ni una falte). Cadena de resolucion:
+//   1) iTunes (limit 25, matching estricto titulo+artista, 600x600)
+//   2) YouTube Music (la misma busqueda WEB_REMIX del worker): caratula
+//      cuadrada OFICIAL de googleusercontent para TODO lo distribuible —
+//      DtMF, Gata Only, PERRO NEGRO, dembow, phonk... iTunes no las
+//      tiene, YTM si. Reemplaza miniaturas de video (marcas VEVO).
+//   3) Deezer (desde Cloudflare) como ultimo recurso.
+// Matching estricto titulo + artista (penaliza junk para preferir la
+// original); sin match confiable se conserva la miniatura de YouTube.
+// Cache: memoria por isolato + D1 art_cache (hits perpetuos, fallos
+// re-intentables a las 12h; los negativos previos a v2.10 se flushean
+// una vez). Presupuesto de upstream por peticion (ventanas separadas
+// para APIs de catalogo y para YTM) respetando los limites.
 // ------------------------------------------------------------
 const OFFICIAL_ART_MEM = new Map();
-const ART_NEG_TTL_MS = 3 * 86400000;
+const ART_NEG_TTL_MS = 12 * 3600000;
+// v2.10: flush de todos los negativos cacheados antes del deploy
+const ART_NEG_EPOCH = 1793753708843;
 let ART_TABLE_READY = false;
 const ART_UPSTREAM_WIN = { at: 0, n: 0 };
+const ART_YTM_WIN = { at: 0, n: 0 };
 
 function normArtStr(s) {
   s = String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -816,8 +825,8 @@ function artPickBest(results, artist, title) {
   return u ? itunesArtUpscale(u) : "";
 }
 async function fetchItunesSongs(term) {
-  const res = await fetch("https://itunes.apple.com/search?term=" + encodeURIComponent(term) + "&entity=song&limit=8&country=US", {
-    headers: { "User-Agent": "AuroraMusic/2.9 (+art)" },
+  const res = await fetch("https://itunes.apple.com/search?term=" + encodeURIComponent(term) + "&entity=song&limit=25&country=US", {
+    headers: { "User-Agent": "AuroraMusic/2.10 (+art)" },
     signal: AbortSignal.timeout(3500),
   });
   if (!res.ok) return [];
@@ -825,18 +834,69 @@ async function fetchItunesSongs(term) {
   return (j && j.results) || [];
 }
 async function fetchDeezerSongs(term) {
-  const res = await fetch("https://api.deezer.com/search?q=" + encodeURIComponent(term) + "&limit=8", {
-    headers: { "User-Agent": "AuroraMusic/2.9 (+art)" },
+  const res = await fetch("https://api.deezer.com/search?q=" + encodeURIComponent(term) + "&limit=25", {
+    headers: { "User-Agent": "AuroraMusic/2.10 (+art)" },
     signal: AbortSignal.timeout(3500),
   });
   if (!res.ok) return [];
   const j = await res.json();
   return (j && j.data) || [];
 }
+// v2.10: presupuesto propio para YTM (misma infra que la busqueda de
+// canciones; ventana generosa pero acotada por peticion/isolato)
+function ytmUpstreamAllowed() {
+  const now = Date.now();
+  if (now - ART_YTM_WIN.at > 10000) { ART_YTM_WIN.at = now; ART_YTM_WIN.n = 0; }
+  if (ART_YTM_WIN.n >= 40) return false;
+  ART_YTM_WIN.n++;
+  return true;
+}
+// v2.10: matching sobre resultados de busqueda de YouTube Music.
+// Solo acepta caratulas cuadradas oficiales (googleusercontent) — jamas
+// miniaturas de video. Titulo exacto, o parcial + artista en comun;
+// penaliza versiones junk para preferir la portada de la ORIGINAL.
+function ytmArtMatch(songs, artist, title) {
+  const qt = normArtStr(title), qa = artTokens(artist);
+  if (!qt || !Array.isArray(songs)) return "";
+  let best = null, bestScore = -1;
+  songs.forEach((r) => {
+    const rt = normArtStr(r.title || ""), ra = normArtStr(r.artist || "");
+    if (!rt) return;
+    const thumb = String(r.thumb || "");
+    if (thumb.indexOf("googleusercontent.com") === -1) return; // solo caratula oficial
+    const titleExact = rt === qt;
+    const titlePartial = qt.length >= 4 && rt.length >= 4 && (rt.includes(qt) || qt.includes(rt));
+    if (!titleExact && !titlePartial) return;
+    const raTok = new Set(artTokens(ra));
+    let artistHits = 0;
+    for (const w of qa) if (raTok.has(w)) artistHits++;
+    if (!titleExact && artistHits === 0) return; // parcial exige artista
+    // titulo exacto sin artista en comun: solo titulos con 2+ palabras
+    // significativas (evita falsos positivos con titulos genericos)
+    if (titleExact && artistHits === 0 && artTokens(qt).length < 2) return;
+    const junk = /(slowed|reverb|sped|instrumental|karaoke|8.?bit|tribute|piano|nightcore|extended|loop)/i.test(r.title || "");
+    const score = (titleExact ? 100 : 50) + artistHits * 10 - (junk ? 60 : 0) - (artistHits === 0 ? 25 : 0);
+    if (score > bestScore) { bestScore = score; best = r; }
+  });
+  if (!best) return "";
+  let u = String(best.thumb || "");
+  if (!u) return "";
+  u = u.replace(/=w\d+-h\d+[^=]*$/, "=w544-h544-l90-rj");
+  if (u.indexOf("googleusercontent.com") !== -1) return u;
+  return "";
+}
 async function resolveOfficialArtOnce(artist, title) {
   const term = (String(artist || "") + " " + String(title || "")).replace(/\s+/g, " ").trim();
   if (!term) return "";
   try { const it = artPickBest(await fetchItunesSongs(term), artist, title); if (it) return it; } catch (_) {}
+  // v2.10: YouTube Music — el catalogo universal (todo lo distribuible)
+  if (ytmUpstreamAllowed()) {
+    try {
+      const yres = await fetchYTMSearch(term, YTM_SEARCH_PARAMS);
+      const ym = ytmArtMatch(yres.songs || [], artist, title);
+      if (ym) return ym;
+    } catch (_) {}
+  }
   try { const dz = artPickBest(await fetchDeezerSongs(term), artist, title); if (dz) return dz; } catch (_) {}
   return "";
 }
@@ -880,7 +940,9 @@ async function getOfficialArtBatch(env, pairs, novelBudget) {
         const row = found.get(k);
         if (!row) return true;
         if (row.u) { out.set(k, row.u); memorizeArt(k, row.u); return false; }
-        if (row.at && now - row.at < ART_NEG_TTL_MS) { out.set(k, ""); memorizeArt(k, ""); return false; }
+        // v2.10: negativo previo al deploy -> reintentar (nueva cadena);
+        // negativo reciente -> esperar el TTL
+        if (row.at && row.at > ART_NEG_EPOCH && now - row.at < ART_NEG_TTL_MS) { out.set(k, ""); memorizeArt(k, ""); return false; }
         return true; // fallo viejo -> reintentar
       });
     } catch (_) {}
