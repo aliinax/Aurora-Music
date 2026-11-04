@@ -4,30 +4,28 @@
 
 # 🎵 AuroraMusic
 
-**Web & Android music app: listen to any song that exists — full tracks, no account, no ads.**
+**Android music app: listen to any song that exists — full tracks, no account, no ads.**
 
 [![Android APK](https://img.shields.io/github/v/release/DevAuroraX/Aurora-Music?style=flat-square&color=38bdf8&label=Android%20APK)](https://github.com/DevAuroraX/Aurora-Music/releases/latest)
-[![Web](https://img.shields.io/badge/web-music.aurorax.site-3ddc84?style=flat-square)](https://music.aurorax.site)
 [![Languages](https://img.shields.io/badge/languages-12-818cf8?style=flat-square)](#-languages)
 
-**[🌐 Open the web app](https://music.aurorax.site)** · **[⬇️ Download the APK](https://github.com/DevAuroraX/Aurora-Music/releases/latest/download/AuroraMusic.v1.0.0.apk)** · **[💬 Our Discord](https://discord.gg/pU9ckzwsut)**
+**[⬇️ Download the APK](https://github.com/DevAuroraX/Aurora-Music/releases/latest/download/AuroraMusic.v1.0.0.apk)** · **[💬 Our Discord](https://discord.gg/pU9ckzwsut)**
 
 </div>
 
-AuroraMusic is music, the free way: a free music web app and an Android music app in one. Search for any song you want and listen to it — the full track, instantly, with no account and no ads of any kind.
+AuroraMusic is music, the free way: a free Android music app. Search for any song you want and listen to it — the full track, instantly, with no account and no ads of any kind.
 
-It's an independent project by our group. The web app and the APK both come from this repository, so you always know where AuroraMusic comes from and that what you download is the original.
+It's an independent project by our group. The APK comes from this repository, so you always know where AuroraMusic comes from and that what you download is the original.
 
 ## ✨ Why AuroraMusic
 
 - 🎧 **Any music that exists** — from today's biggest hits to the hardest song to find. Full tracks, start to finish.
 - 🚫 **No account** — no sign-ups, no emails, no passwords. Open, search, listen.
 - 📢 **No ads** — none. The music plays; it doesn't get interrupted.
-- 📱 **Official Android app** — music controls in the notification bar and on the lock screen. Switch between the app and the web, and the song picks up exactly where you left it.
+- 📱 **Official Android app** — music controls in the notification bar and on the lock screen.
 - ❤️ **Favorites & history** — save your favorite songs, check what you've been listening to, clear it whenever you want.
 - 📴 **Offline mode** — if your internet drops, AuroraMusic lets you know and recovers on its own when the connection comes back.
 - 🔒 **Private by design** — your library, favorites and history live on your own device, not on anyone else's server.
-- 🌐 **Also a web app** — the same music and the same experience in any desktop or mobile browser, installable as an app.
 
 ## 📲 Download the Android app (APK)
 
@@ -72,11 +70,11 @@ If you download an "AuroraMusic" somewhere else and the signature or the file do
 
 ## 🌎 Languages
 
-The web app and the Android app are fully translated into **12 languages**: English, Español, Português, Français, Deutsch, Italiano, Русский, 日本語, 한국어, 中文, العربية, हिन्दी.
+The Android app is fully translated into **12 languages**: English, Español, Português, Français, Deutsch, Italiano, Русский, 日本語, 한국어, 中文, العربية, हिन्दी.
 
 ## 💬 Our group
 
-AuroraMusic — the web app and the Android app — is a project by our group, and this repository is its official home. News, song requests and direct support:
+AuroraMusic is a project by our group, and this repository is its official home. News, song requests and direct support:
 
 **[Join our Discord](https://discord.gg/pU9ckzwsut)**
 
@@ -86,7 +84,7 @@ AuroraMusic — the web app and the Android app — is a project by our group, a
 - **Do I need to sign up to listen to music?** No. Open it, search for the song, play it.
 - **Where do I get the official APK?** From the web app ([music.aurorax.site](https://music.aurorax.site)) or from this repository's [releases](https://github.com/DevAuroraX/Aurora-Music/releases/latest). The official signature is published above so you can verify any file.
 - **Does it work on iPhone, iPad or PC?** Yes: [music.aurorax.site](https://music.aurorax.site) works in any modern browser.
-- **Is it a copy of another app?** No: AuroraMusic is our group's own project, with its own web app and Android app. Any "AuroraMusic" that doesn't come from the official places above is not ours.
+- **Is it a copy of another app?** No: AuroraMusic is our group's own project, with its own Android app. Any "AuroraMusic" that doesn't come from the official places above is not ours.
 
 ## 📸 Screenshots
 
@@ -104,6 +102,6 @@ AuroraMusic — the web app and the Android app — is a project by our group, a
 
 Made with 🎶 by **[aliinax](https://github.com/aliinax)**
 
-<sub>© AuroraMusic — our group's music web & app.</sub>
+<sub>© AuroraMusic — our group's music app.</sub>
 
 </div>
