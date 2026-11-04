@@ -22,9 +22,6 @@ It's an independent project by our group. The APK comes from this repository, so
 - 🎧 **Any music that exists** — from today's biggest hits to the hardest song to find. Full tracks, start to finish.
 - 🚫 **No account** — no sign-ups, no emails, no passwords. Open, search, listen.
 - 📢 **No ads** — none. The music plays; it doesn't get interrupted.
-- 📱 **Official Android app** — music controls in the notification bar and on the lock screen.
-- ❤️ **Favorites & history** — save your favorite songs, check what you've been listening to, clear it whenever you want.
-- 📴 **Offline mode** — if your internet drops, AuroraMusic lets you know and recovers on its own when the connection comes back.
 - 🔒 **Private by design** — your library, favorites and history live on your own device, not on anyone else's server.
 
 ## 📲 Download the Android app (APK)
