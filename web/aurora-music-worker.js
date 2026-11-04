@@ -283,6 +283,9 @@ async function searchYouTubeMusic(query, env = null) {
   }
 
   const allSongs = [...dbResults, ...ytResults];
+  // AURORA-MUSIC v2.9: portadas oficiales (antes de sintetizar albumes/artistas
+  // para que los sintetizados hereden la caratula real)
+  await enrichTracksWithArt(env, allSongs, 8);
 
   // Synthesize artists from songs if none returned from YTM
   if (artists.length === 0 && allSongs.length > 0) {
@@ -746,6 +749,190 @@ function formatDuration(sec) {
 }
 
 // Curated home collections (D1 Database + Cloudflare R2 + Fast Curated Trending)
+
+// ------------------------------------------------------------
+// AURORA-MUSIC v2.9 — Portadas oficiales (caratula original del
+// single/album via iTunes, fallback Deezer) para todas las canciones.
+// Reemplaza miniaturas de video (marcas VEVO, fotogramas, barras) por
+// la portada real. Matching ESTRICTO titulo+artista: sin match
+// confiable se conserva la miniatura de YouTube (sin regression).
+// Cache: memoria por isolato + D1 art_cache (hits perpetuos,
+// fallos re-intentables a los 3 dias). Presupuesto de upstream
+// por peticion para respetar los limites de la API.
+// ------------------------------------------------------------
+const OFFICIAL_ART_MEM = new Map();
+const ART_NEG_TTL_MS = 3 * 86400000;
+let ART_TABLE_READY = false;
+const ART_UPSTREAM_WIN = { at: 0, n: 0 };
+
+function normArtStr(s) {
+  s = String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  s = s.replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ");
+  s = s.replace(/\b(feat|ft|featuring|with|prod)\b/g, " ");
+  s = s.replace(/[^a-z0-9 ]+/g, " ");
+  return s.replace(/\s+/g, " ").trim();
+}
+function artTokens(s) {
+  const stop = new Set(["the", "and", "los", "las", "del", "de", "la", "el", "con", "y"]);
+  return normArtStr(s).split(" ").filter(w => w.length >= 3 && !stop.has(w));
+}
+function artKeyOf(artist, title) {
+  const a = normArtStr(artist), t = normArtStr(title);
+  if (!a || !t) return "";
+  return (a + "|" + t).slice(0, 160);
+}
+function artUpstreamAllowed() {
+  const now = Date.now();
+  if (now - ART_UPSTREAM_WIN.at > 10000) { ART_UPSTREAM_WIN.at = now; ART_UPSTREAM_WIN.n = 0; }
+  if (ART_UPSTREAM_WIN.n >= 25) return false;
+  ART_UPSTREAM_WIN.n++;
+  return true;
+}
+function itunesArtUpscale(u) {
+  return String(u || "").replace(/\/\d+x\d+(bb)?\.jpg$/i, "/600x600bb.jpg").replace("100x100bb", "600x600bb");
+}
+function artPickBest(results, artist, title) {
+  const qt = normArtStr(title), qa = artTokens(artist);
+  if (!qt || !qa.length || !Array.isArray(results)) return "";
+  let best = null, bestScore = -1;
+  results.forEach((r, idx) => {
+    const rt = normArtStr(r.trackName || r.title || "");
+    const ra = normArtStr(r.artistName || (r.artist && r.artist.name) || "");
+    if (!rt) return;
+    const titleExact = rt === qt;
+    const titlePartial = qt.length >= 4 && rt.length >= 4 && (rt.includes(qt) || qt.includes(rt));
+    if (!titleExact && !titlePartial) return;
+    const raTok = new Set(artTokens(ra));
+    let artistHits = 0;
+    for (const w of qa) if (raTok.has(w)) artistHits++;
+    if (artistHits === 0) return; // artista incorrecto -> no confiamos
+    const junk = /(slowed|reverb|sped|instrumental|karaoke|8.?bit|tribute|piano|nightcore|extended|loop)/i
+      .test((r.trackName || "") + " " + (r.collectionName || (r.album && r.album.title) || ""));
+    const score = (titleExact ? 100 : 50) + artistHits * 10 - (junk ? 15 : 0) - idx;
+    if (score > bestScore) { bestScore = score; best = r; }
+  });
+  if (!best) return "";
+  const u = best.artworkUrl100 || (best.album && (best.album.cover_xl || best.album.cover_big)) || "";
+  return u ? itunesArtUpscale(u) : "";
+}
+async function fetchItunesSongs(term) {
+  const res = await fetch("https://itunes.apple.com/search?term=" + encodeURIComponent(term) + "&entity=song&limit=8&country=US", {
+    headers: { "User-Agent": "AuroraMusic/2.9 (+art)" },
+    signal: AbortSignal.timeout(3500),
+  });
+  if (!res.ok) return [];
+  const j = await res.json();
+  return (j && j.results) || [];
+}
+async function fetchDeezerSongs(term) {
+  const res = await fetch("https://api.deezer.com/search?q=" + encodeURIComponent(term) + "&limit=8", {
+    headers: { "User-Agent": "AuroraMusic/2.9 (+art)" },
+    signal: AbortSignal.timeout(3500),
+  });
+  if (!res.ok) return [];
+  const j = await res.json();
+  return (j && j.data) || [];
+}
+async function resolveOfficialArtOnce(artist, title) {
+  const term = (String(artist || "") + " " + String(title || "")).replace(/\s+/g, " ").trim();
+  if (!term) return "";
+  try { const it = artPickBest(await fetchItunesSongs(term), artist, title); if (it) return it; } catch (_) {}
+  try { const dz = artPickBest(await fetchDeezerSongs(term), artist, title); if (dz) return dz; } catch (_) {}
+  return "";
+}
+async function ensureArtTable(env) {
+  if (ART_TABLE_READY || !env || !env.DB) return;
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS art_cache (k TEXT PRIMARY KEY, u TEXT NOT NULL DEFAULT '', at INTEGER NOT NULL)").run();
+  } catch (_) {}
+  ART_TABLE_READY = true;
+}
+function memorizeArt(key, url) {
+  if (OFFICIAL_ART_MEM.size > 3000) {
+    const first = OFFICIAL_ART_MEM.keys().next().value;
+    OFFICIAL_ART_MEM.delete(first);
+  }
+  OFFICIAL_ART_MEM.set(key, url);
+}
+async function getOfficialArtBatch(env, pairs, novelBudget) {
+  const out = new Map();
+  if (!Array.isArray(pairs) || !pairs.length) return out;
+  const keys = [];
+  const seenK = new Set();
+  for (const p of pairs) {
+    const k = artKeyOf(p.a, p.t);
+    if (k && !seenK.has(k)) { seenK.add(k); keys.push(k); }
+  }
+  if (!keys.length) return out;
+  await ensureArtTable(env);
+  let missing = [];
+  for (const k of keys) {
+    if (OFFICIAL_ART_MEM.has(k)) out.set(k, OFFICIAL_ART_MEM.get(k));
+    else missing.push(k);
+  }
+  if (missing.length && env && env.DB) {
+    try {
+      const ph = missing.map(() => "?").join(",");
+      const rows = await env.DB.prepare("SELECT k, u, at FROM art_cache WHERE k IN (" + ph + ")").bind(...missing).all();
+      const found = new Map(((rows && rows.results) || []).map(r => [r.k, r]));
+      const now = Date.now();
+      missing = missing.filter(k => {
+        const row = found.get(k);
+        if (!row) return true;
+        if (row.u) { out.set(k, row.u); memorizeArt(k, row.u); return false; }
+        if (row.at && now - row.at < ART_NEG_TTL_MS) { out.set(k, ""); memorizeArt(k, ""); return false; }
+        return true; // fallo viejo -> reintentar
+      });
+    } catch (_) {}
+  }
+  const toResolve = [];
+  let budget = novelBudget | 0;
+  for (const k of missing) {
+    if (budget <= 0 || !artUpstreamAllowed()) break;
+    budget--;
+    toResolve.push(k);
+  }
+  if (toResolve.length) {
+    await Promise.all(toResolve.map(async k => {
+      const i = k.indexOf("|");
+      const u = await resolveOfficialArtOnce(k.slice(0, i), k.slice(i + 1)).catch(() => "");
+      out.set(k, u);
+      memorizeArt(k, u);
+    }));
+    if (env && env.DB) {
+      try {
+        await env.DB.batch(toResolve.map(k =>
+          env.DB.prepare("INSERT OR REPLACE INTO art_cache (k, u, at) VALUES (?, ?, ?)").bind(k, out.get(k) || "", Date.now())
+        ));
+      } catch (_) {}
+    }
+  }
+  for (const k of missing) if (!out.has(k)) out.set(k, "");
+  return out;
+}
+async function enrichTracksWithArt(env, tracks, novelBudget) {
+  try {
+    if (!Array.isArray(tracks) || !tracks.length) return tracks;
+    const pairs = [];
+    const seen = new Set();
+    for (const tr of tracks) {
+      if (!tr || !tr.thumb || String(tr.thumb).indexOf("i.ytimg.com") === -1) continue;
+      const k = artKeyOf(tr.artist, tr.title);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      pairs.push({ a: tr.artist, t: tr.title });
+    }
+    if (!pairs.length) return tracks;
+    const art = await getOfficialArtBatch(env, pairs, novelBudget || 12);
+    for (const tr of tracks) {
+      if (!tr || !tr.thumb || String(tr.thumb).indexOf("i.ytimg.com") === -1) continue;
+      const u = art.get(artKeyOf(tr.artist, tr.title));
+      if (u) tr.thumb = u;
+    }
+  } catch (_) {}
+  return tracks;
+}
+
 const DEFAULT_TRENDING = [
   { id: "kIft-LUHHVA", title: "Espresso", artist: "Sabrina Carpenter", album: "Short n' Sweet", duration: 176, duration_text: "2:56", thumb: "https://i.ytimg.com/vi/kIft-LUHHVA/hqdefault.jpg", r2Ready: true, rank: 1 },
   { id: "kPa7bsKwL-c", title: "Die With A Smile", artist: "Lady Gaga, Bruno Mars", album: "Die With A Smile", duration: 252, duration_text: "4:12", thumb: "https://i.ytimg.com/vi/kPa7bsKwL-c/hqdefault.jpg", r2Ready: true, rank: 2 },
@@ -826,10 +1013,16 @@ async function getCuratedHome(env) {
 
   const trendingRes = await getTrendingTracks(env);
 
+  // AURORA-MUSIC v2.9: portadas oficiales para banners, novedades y tendencias
+  const featuredList = popularFromDb.length ? popularFromDb.slice(0, 12) : defaultFeatured;
+  const freshList = freshFromDb.length ? freshFromDb.slice(0, 10) : defaultFeatured.slice(2);
+  const trendingList = trendingRes.results ? trendingRes.results.slice(0, 12) : [];
+  await enrichTracksWithArt(env, [...featuredList, ...freshList, ...trendingList], 18);
+
   return {
-    featured: popularFromDb.length ? popularFromDb.slice(0, 12) : defaultFeatured,
-    fresh: freshFromDb.length ? freshFromDb.slice(0, 10) : defaultFeatured.slice(2),
-    trending: trendingRes.results ? trendingRes.results.slice(0, 12) : [],
+    featured: featuredList,
+    fresh: freshList,
+    trending: trendingList,
     categories: [
       { id: "all", name: "Todos", query: "" },
       { id: "workout", name: "Para entrenar", query: "Gym Workout Motivation Reggaeton" },
@@ -970,6 +1163,32 @@ export default {
       return jsonResponse(data);
     }
 
+    // AURORA-MUSIC v2.9: portadas oficiales en lote (para entradas del
+    // historial/favoritos guardadas antes del parche). POST {items:[{a,t}]}
+    // -> {r: {"a\u241ft": url}} (url vacia = sin match confiable)
+    if (path === "/api/art" && method === "POST") {
+      let items = [];
+      try {
+        const body = await request.json();
+        if (body && Array.isArray(body.items)) {
+          items = body.items.slice(0, 50).map(p => ({
+            a: String((p && p.a) || "").slice(0, 80),
+            t: String((p && p.t) || "").slice(0, 120)
+          })).filter(p => p.a && p.t);
+        }
+      } catch (_) {}
+      const art = await getOfficialArtBatch(env, items, 10);
+      const r = {};
+      const seenCk = new Set();
+      for (const p of items) {
+        const ck = p.a + "\u241f" + p.t;
+        if (seenCk.has(ck)) continue;
+        seenCk.add(ck);
+        r[ck] = art.get(artKeyOf(p.a, p.t)) || "";
+      }
+      return jsonResponse({ ok: true, r });
+    }
+
     if (path === "/api/home" && (method === "GET" || method === "HEAD")) {
       const homeData = await getCuratedHome(env);
       return jsonResponse(homeData);
@@ -977,6 +1196,8 @@ export default {
 
     if (path === "/api/trending" && (method === "GET" || method === "HEAD")) {
       const trendingData = await getTrendingTracks(env);
+      // AURORA-MUSIC v2.9: portadas oficiales (queda cacheado en TRENDING_CACHE)
+      await enrichTracksWithArt(env, trendingData.results, 16);
       return jsonResponse(trendingData);
     }
 
@@ -985,6 +1206,8 @@ export default {
       if (VID_ALIASES[vid]) vid = VID_ALIASES[vid];
       if (!isValidVideoId(vid)) return jsonResponse({ results: [] });
       const tracks = await fetchYTMRadioQueue(vid);
+      // AURORA-MUSIC v2.9: portadas oficiales para la cola de radio
+      await enrichTracksWithArt(env, tracks, 8);
       return jsonResponse({ results: tracks });
     }
 
@@ -993,7 +1216,11 @@ export default {
       if (VID_ALIASES[vid]) vid = VID_ALIASES[vid];
       if (isValidVideoId(vid)) {
         const radioTracks = await fetchYTMRadioQueue(vid);
-        if (radioTracks && radioTracks.length) return jsonResponse({ results: radioTracks });
+        if (radioTracks && radioTracks.length) {
+          // AURORA-MUSIC v2.9: portadas oficiales
+          await enrichTracksWithArt(env, radioTracks, 8);
+          return jsonResponse({ results: radioTracks });
+        }
       }
       const artist = (url.searchParams.get("artist") || "").trim();
       const genre = (url.searchParams.get("genre") || "").trim();
@@ -1011,7 +1238,11 @@ export default {
 
       // Check if in DEFAULT_TRENDING
       const trendingMatch = DEFAULT_TRENDING.find(t => t.id === vid);
-      if (trendingMatch) return jsonResponse(trendingMatch);
+      if (trendingMatch) {
+        // AURORA-MUSIC v2.9: portada oficial (no-op si ya esta enriquecido)
+        await enrichTracksWithArt(env, [trendingMatch], 1);
+        return jsonResponse(trendingMatch);
+      }
 
       // Check in D1 Database
       if (env && env.DB) {
@@ -1020,7 +1251,8 @@ export default {
             "SELECT s.vid, s.title, s.artist, s.album, s.duration FROM songs s JOIN tracks t ON t.id = s.track_id WHERE s.vid = ? LIMIT 1"
           ).bind(vid).first();
           if (row) {
-            return jsonResponse({
+            // AURORA-MUSIC v2.9: portada oficial
+            const rowTrack = {
               id: row.vid,
               title: row.title,
               artist: row.artist || "Artista Aurora",
@@ -1029,7 +1261,9 @@ export default {
               duration_text: formatDuration(row.duration || 210),
               thumb: `https://i.ytimg.com/vi/${row.vid}/hqdefault.jpg`,
               r2Ready: true
-            });
+            };
+            await enrichTracksWithArt(env, [rowTrack], 1);
+            return jsonResponse(rowTrack);
           }
         } catch (_) {}
       }
@@ -7479,6 +7713,28 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       if (mArtist) mArtist.textContent = track.artist;
       if (mCover) mCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
 
+      // AURORA-MUSIC v2.9: si el track traia miniatura de video, actualizar
+      // reproductor + notificacion con la caratula oficial cuando llegue
+      AURORA_ART.want(function(u) {
+        try {
+          track.thumb = u;
+          if (pCover) pCover.src = u;
+          const mc = $('modalCover');
+          if (mc) mc.src = u;
+          if ('mediaSession' in navigator && navigator.mediaSession) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+              title: track.title,
+              artist: track.artist,
+              album: 'Aurora Music',
+              artwork: [{ src: u, sizes: '600x600', type: 'image/jpeg' }]
+            });
+          }
+          if (window.AndroidBridge && typeof window.AndroidBridge.onTrackChanged === 'function') {
+            window.AndroidBridge.onTrackChanged(JSON.stringify(track));
+          }
+        } catch (_) {}
+      }, track);
+
       // Reset scrubber & time immediately
       if (pProgressBar) pProgressBar.style.width = '0%';
       const curEl = $('currentTime') || $('curTime');
@@ -8360,6 +8616,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           }
         };
 
+        AURORA_ART.want(row.querySelector('img.track-row-thumb'), track);
         containerEl.appendChild(row);
       });
     }
@@ -8392,6 +8649,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       const likeText = $('menuLikeText');
 
       if (thumb) thumb.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
+      if (thumb) AURORA_ART.want(thumb, track);
       if (title) title.textContent = track.title || '-';
       if (artist) artist.textContent = track.artist || '-';
       if (likeText) {
@@ -8627,6 +8885,79 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     // --------------------------------------------------------
     // Home View Feed & Reusable Renderers
     // --------------------------------------------------------
+    // --------------------------------------------------------
+    // AURORA-MUSIC v2.9 — Portadas oficiales para entradas viejas
+    // Las listas del servidor ya llegan con la caratula original; esto
+    // arregla las entradas guardadas ANTES del parche en el dispositivo
+    // (miniatura de video: marcas VEVO, fotogramas). Pide en lote
+    // /api/art y cambia el src de las imagenes cuando llega la oficial.
+    // --------------------------------------------------------
+    const AURORA_ART = {
+      cache: new Map(),
+      pend: new Map(),
+      timer: null,
+      want: function(target, track) {
+        try {
+          if (!target || !track) return;
+          if (typeof target === 'object' && !target.parentNode) return;
+          if (String(track.thumb || '').indexOf('i.ytimg.com') === -1) return;
+          const a = String(track.artist || '').trim();
+          const tt = String(track.title || '').trim();
+          if (!a || !tt || a === 'Artista' || a === 'Artista Aurora') return;
+          const k = a + '\u241f' + tt;
+          const c = this.cache.get(k);
+          if (c !== undefined) {
+            if (c) this._apply(target, c);
+            return;
+          }
+          let arr = this.pend.get(k);
+          if (!arr) this.pend.set(k, arr = []);
+          if (arr.indexOf(target) === -1) arr.push(target);
+          if (this.timer) clearTimeout(this.timer);
+          this.timer = setTimeout(() => this.flush(), 400);
+        } catch (_) {}
+      },
+      _apply: function(target, url) {
+        try {
+          if (typeof target === 'function') { target(url); return; }
+          if (target && target.parentNode) target.src = url;
+        } catch (_) {}
+      },
+      flush: async function() {
+        const items = [];
+        for (const k of this.pend.keys()) {
+          if (items.length >= 50) break;
+          const i = k.indexOf('\u241f');
+          items.push({ a: k.slice(0, i), t: k.slice(i + 1) });
+        }
+        if (!items.length) return;
+        try {
+          const res = await fetch('/api/art', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: items })
+          });
+          if (res.ok) {
+            const d = await res.json();
+            const r = (d && d.r) || {};
+            for (const it of items) {
+              const k = it.a + '\u241f' + it.t;
+              const u = r[k] || '';
+              this.cache.set(k, u);
+              const targets = this.pend.get(k) || [];
+              this.pend.delete(k);
+              if (u) for (const tg of targets) this._apply(tg, u);
+            }
+          } else {
+            this.pend.clear();
+          }
+        } catch (_) {
+          this.pend.clear();
+        }
+      }
+    };
+    window.AURORA_ART = AURORA_ART;
+
     async function renderQuickPicks() {
       const grid = $('homeQuickPicksGrid');
       if (!grid) return;
@@ -8669,6 +9000,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           }
           playTrack(t, null, false, false);
         };
+        AURORA_ART.want(card.querySelector('img.ytm-quick-thumb'), t);
         grid.appendChild(card);
       });
     }
@@ -8725,6 +9057,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             <div class="card-artist">\${track.artist}</div>
           \`;
           card.onclick = () => playTrack(track, null, false, false);
+          AURORA_ART.want(card.querySelector('img.card-thumb'), track);
           container.appendChild(card);
         });
       } catch (_) {
@@ -8766,6 +9099,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           }
           playTrack(track, null, false, false);
         };
+        AURORA_ART.want(card.querySelector('img.ytm-quick-thumb'), track);
         container.appendChild(card);
       });
     }
@@ -8804,6 +9138,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
           }
           playTrack(track, null, false, false);
         };
+        AURORA_ART.want(card.querySelector('img.ytm-quick-thumb'), track);
         list.appendChild(card);
       });
     }
@@ -8819,6 +9154,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       if (pTitle) pTitle.textContent = track.title;
       if (pArtist) pArtist.textContent = track.artist;
       if (pCover) pCover.src = track.thumb || \`https://i.ytimg.com/vi/\${track.id}/hqdefault.jpg\`;
+      if (pCover) AURORA_ART.want(pCover, track);
       const pBar = $('playerBar');
       if (pBar) pBar.classList.add('visible', 'active');
       const curEl = $('currentTime') || $('curTime');
@@ -8981,6 +9317,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
                 }
                 playTrack(t, null, false, false);
               };
+              AURORA_ART.want(card.querySelector('img.ytm-quick-thumb'), t);
               grid.appendChild(card);
             });
           }
