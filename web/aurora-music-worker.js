@@ -128,8 +128,30 @@ async function fetchYTMSearch(query, searchParams = null) {
       signal: AbortSignal.timeout(8000),
     });
 
-    if (!res.ok) return { songs: [], albums: [], artists: [] };
+    if (!res.ok) return { songs: [], albums: [], artists: [], correction: null };
     const json = await res.json();
+
+    // AURORA-MUSIC v2.13: correccion de typos del propio YouTube — la
+    // inteligencia de "Mostrando resultados para X" (autocorreccion) y
+    // "Quisiste decir X" (sugerencia), tal cual la app de YT Music.
+    let correction = null;
+    (function findCorrection(node) {
+      if (!node || typeof node !== "object" || correction) return;
+      if (Array.isArray(node)) { for (const n of node) findCorrection(n); return; }
+      if (node.showingResultsForRenderer || node.didYouMeanRenderer) {
+        const cr = node.showingResultsForRenderer || node.didYouMeanRenderer;
+        const cqRuns = (cr.correctedQuery && cr.correctedQuery.runs) || [];
+        const cq = cqRuns.map(x => x.text).join("").replace(/[\x00-\x1F\x7F]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+        if (cq) {
+          correction = {
+            type: node.showingResultsForRenderer ? "showing" : "didYouMean",
+            query: cq,
+          };
+        }
+        return;
+      }
+      for (const k in node) findCorrection(node[k]);
+    })(json.contents || {});
 
     const shelves = [];
     (function walk(node) {
@@ -213,10 +235,203 @@ async function fetchYTMSearch(query, searchParams = null) {
       for (const k in node) findEntities(node[k]);
     })(json.contents || {});
 
-    return { songs, albums, artists };
+    return { songs, albums, artists, correction };
   } catch (_) {
-    return { songs: [], albums: [], artists: [] };
+    return { songs: [], albums: [], artists: [], correction: null };
   }
+}
+
+// ------------------------------------------------------------
+// AURORA-MUSIC v2.13 — Buscador inteligente tipo YT Music
+//
+// 1) Sugerencias en vivo: el MISMO motor que usa la app de YT Music
+//    (music/get_search_suggestions, WEB_REMIX). Entiende typos y
+//    acentos: escribir "despasito" sugiere "despacito" antes de
+//    buscar. Cache por isolato (TTL 10 min) para que repetir letras
+//    sea instantaneo, y fallback a suggestqueries (ds=yt).
+// 2) Fuzzy D1: el catalogo local tambien entiende typos ("despasito"
+//    encuentra "Despacito" en D1 igual que en YouTube): normalizacion
+//    de acentos + tokens + Levenshtein sobre el pool de top plays.
+// ------------------------------------------------------------
+const SUGGEST_CACHE = new Map(); // "hl|q" -> { at, items }
+const SUGGEST_TTL = 10 * 60 * 1000;
+const SUGGEST_MAX_ENTRIES = 240;
+
+function suggestHl(raw) {
+  const h = String(raw || "").toLowerCase().split(/[-_]/)[0];
+  const ok = ["es", "en", "pt", "fr", "de", "it", "ru", "ja", "ko", "zh", "ar", "hi"];
+  return ok.includes(h) ? h : "es";
+}
+
+async function fetchYTMusicSuggestions(q, hl) {
+  try {
+    const res = await fetch("https://music.youtube.com/youtubei/v1/music/get_search_suggestions?prettyPrint=false", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": YTM_UA,
+        "origin": "https://music.youtube.com",
+        "referer": "https://music.youtube.com/",
+      },
+      body: JSON.stringify({
+        context: { client: { clientName: "WEB_REMIX", clientVersion: YTM_CV, hl, gl: "US" } },
+        input: q,
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const items = [];
+    const seenS = new Set();
+    (function walk(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+      if (node.searchSuggestionRenderer) {
+        const r = node.searchSuggestionRenderer;
+        const runs = (r.suggestion && r.suggestion.runs) || [];
+        const full = runs.map(x => x.text).join("").replace(/[\x00-\x1F\x7F]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+        const boldPart = runs.filter(x => x.bold).map(x => x.text).join("");
+        const qStr = String((r.navigationEndpoint && r.navigationEndpoint.searchEndpoint && r.navigationEndpoint.searchEndpoint.query) || full).slice(0, 120);
+        if (full && !seenS.has(full.toLowerCase())) {
+          seenS.add(full.toLowerCase());
+          items.push({
+            q: qStr || full,
+            pre: boldPart ? boldPart.slice(0, 120) : "",
+            icon: r.icon && r.icon.iconType === "HISTORY" ? "history" : "search",
+          });
+        }
+        return;
+      }
+      for (const k in node) walk(node[k]);
+    })(json.contents || {});
+    return items.slice(0, 10);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchGoogleSuggestFallback(q) {
+  try {
+    const res = await fetch("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=" + encodeURIComponent(q), {
+      headers: { "user-agent": YTM_UA },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const arr = Array.isArray(json) && Array.isArray(json[1]) ? json[1] : [];
+    const items = [];
+    const seenS = new Set();
+    for (const x of arr) {
+      if (typeof x !== "string") continue;
+      const clean = x.replace(/[\x00-\x1F\x7F]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+      if (clean && !seenS.has(clean.toLowerCase())) {
+        seenS.add(clean.toLowerCase());
+        items.push({ q: clean, pre: "", icon: "search" });
+      }
+    }
+    return items.slice(0, 10);
+  } catch (_) {
+    return [];
+  }
+}
+
+async function getSmartSuggestions(rawQ, rawHl) {
+  const q = String(rawQ || "").replace(/[\x00-\x1F\x7F]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+  if (!q) return { ok: true, q: "", items: [] };
+  const hl = suggestHl(rawHl);
+  const key = hl + "|" + q.toLowerCase();
+  const now = Date.now();
+  const cached = SUGGEST_CACHE.get(key);
+  if (cached && now - cached.at < SUGGEST_TTL) {
+    return { ok: true, q, items: cached.items };
+  }
+  let items = await fetchYTMusicSuggestions(q, hl);
+  if (!items || !items.length) items = await fetchGoogleSuggestFallback(q);
+  if (!items) items = [];
+  if (SUGGEST_CACHE.size >= SUGGEST_MAX_ENTRIES) {
+    const first = SUGGEST_CACHE.keys().next().value;
+    if (first !== undefined) SUGGEST_CACHE.delete(first);
+  }
+  SUGGEST_CACHE.set(key, { at: now, items });
+  return { ok: true, q, items };
+}
+
+// ---- Fuzzy D1 (catalogo local que entiende typos y acentos) ----
+const FUZZY_POOL_CACHE = { at: 0, rows: [] };
+const FUZZY_POOL_TTL = 10 * 60 * 1000;
+
+async function getTopSongsPool(env) {
+  const now = Date.now();
+  if (FUZZY_POOL_CACHE.rows.length && now - FUZZY_POOL_CACHE.at < FUZZY_POOL_TTL) {
+    return FUZZY_POOL_CACHE.rows;
+  }
+  const rows = await env.DB.prepare(
+    "SELECT s.vid, s.title, s.artist, s.album, s.duration, s.plays FROM songs s JOIN tracks t ON t.id = s.track_id WHERE t.ext = 'mp3' ORDER BY s.plays DESC LIMIT 400"
+  ).all();
+  FUZZY_POOL_CACHE.at = now;
+  FUZZY_POOL_CACHE.rows = (rows && rows.results) || [];
+  return FUZZY_POOL_CACHE.rows;
+}
+
+// Normalizacion: minusculas, sin acentos, sin parentesis de ruido
+// ("(Official Video)", "[Letra]"), solo letras/numeros.
+function normForFuzzy(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u00f1/g, "n").replace(/\u00e7/g, "c").replace(/\u00f8/g, "o").replace(/\u00e6/g, "ae")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/[^a-z0-9& ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Similaridad de Levenshtein acotada (0..1); descarta pares con
+// longitudes muy distintas para no gastar CPU.
+function levSim(a, b) {
+  if (a === b) return 1;
+  const la = a.length, lb = b.length;
+  if (!la || !lb) return 0;
+  if (Math.abs(la - lb) > 6) return 0;
+  const d = new Array(lb + 1);
+  for (let j = 0; j <= lb; j++) d[j] = j;
+  for (let i = 1; i <= la; i++) {
+    let prev = d[0];
+    d[0] = i;
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= lb; j++) {
+      const tmp = d[j];
+      d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (ca === b.charCodeAt(j - 1) ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  const dist = d[lb];
+  return Math.max(0, 1 - dist / Math.max(la, lb));
+}
+
+// Puntaje difuso: tokens del query contra tokens del target (con
+// prefijos y Levenshtein por token — adaptativo: los tokens de 4+
+// letras toleran 1 typo aunque cambie la longitud) + similitud de
+// la cadena completa.
+function fuzzyScore(qn, qt, targetN) {
+  if (!qn || !targetN || !qt.length) return 0;
+  const tt = targetN.split(" ").filter(Boolean);
+  let hits = 0;
+  for (const tk of qt) {
+    const minSim = tk.length >= 4 ? 0.58 : 0.75;
+    for (const x of tt) {
+      if (x === tk || (tk.length >= 3 && x.startsWith(tk)) || levSim(tk, x) >= minSim) {
+        hits++;
+        break;
+      }
+    }
+  }
+  const tokScore = hits / qt.length;
+  const strScore = levSim(qn, targetN);
+  let score = Math.max(tokScore, tokScore * 0.7 + strScore * 0.3);
+  if (strScore >= 0.86) score = Math.max(score, 0.86);
+  return score;
 }
 
 async function searchYouTubeMusic(query, env = null) {
@@ -249,6 +464,48 @@ async function searchYouTubeMusic(query, env = null) {
             });
           }
         }
+      }
+    } catch (_) {}
+  }
+
+  // AURORA-MUSIC v2.13: el catalogo local TAMBIEN entiende typos y
+  // acentos ("despasito" encuentra "Despacito" en D1 igual que en
+  // YouTube). Si el LIKE exacto trajo pocos resultados, pase difuso
+  // sobre el pool de top plays: umbral 0.62 para no inventar matches
+  // (la cadena de YouTube sigue mandando en la lista final).
+  if (dbResults.length < 8 && cleanQ.length >= 4 && env && env.DB) {
+    try {
+      const pool = await getTopSongsPool(env);
+      const qn = normForFuzzy(cleanQ);
+      const qt = qn.split(" ").filter(Boolean);
+      const fuzzy = [];
+      for (const r of pool) {
+        if (seen.has(r.vid)) continue;
+        const titleN = normForFuzzy(r.title);
+        const artistN = normForFuzzy(r.artist);
+        const score = Math.max(
+          fuzzyScore(qn, qt, titleN),
+          fuzzyScore(qn, qt, artistN),
+          fuzzyScore(qn, qt, titleN + " " + artistN)
+        );
+        if (score >= 0.62) fuzzy.push({ r, score });
+      }
+      fuzzy.sort((a, b) => b.score - a.score || (b.r.plays || 0) - (a.r.plays || 0));
+      for (const f of fuzzy) {
+        if (dbResults.length >= 8) break;
+        if (seen.has(f.r.vid)) continue;
+        seen.add(f.r.vid);
+        dbResults.push({
+          id: f.r.vid,
+          title: f.r.title,
+          artist: f.r.artist || "Artista Aurora",
+          album: f.r.album || "Cat\u00e1logo Aurora",
+          duration: f.r.duration || 210,
+          duration_text: formatDuration(f.r.duration || 210),
+          thumb: `https://i.ytimg.com/vi/${f.r.vid}/mqdefault.jpg`,
+          r2Ready: true,
+          plays: f.r.plays || 0,
+        });
       }
     } catch (_) {}
   }
@@ -336,7 +593,8 @@ async function searchYouTubeMusic(query, env = null) {
     }
   }
 
-  return { results: allSongs, albums: albums.slice(0, 12), artists: artists.slice(0, 10) };
+  const correction = (res && res.correction) || null;
+  return { results: allSongs, albums: albums.slice(0, 12), artists: artists.slice(0, 10), correction };
 }
 
 // v2.12 — miniatura de video de YouTube NORMALIZADA: sin query de
@@ -1339,6 +1597,17 @@ export default {
     }
 
     // ---------- API Endpoints ----------
+    // AURORA-MUSIC v2.13: sugerencias en vivo tipo YT Music — el mismo
+    // motor de autocompletado de YouTube Music (corrige typos mientras
+    // escribes). GET ?q=&hl= -> { ok, q, items:[{q, pre, icon}] }
+    if (path === "/api/suggest" && (method === "GET" || method === "HEAD")) {
+      let sq = (url.searchParams.get("q") || "").replace(/[\x00-\x1F\x7F]/g, "").replace(/\s+/g, " ").trim();
+      if (sq.length > 120) sq = sq.slice(0, 120);
+      const hl = url.searchParams.get("hl") || "es";
+      const sug = await getSmartSuggestions(sq, hl);
+      return jsonResponse(sug);
+    }
+
     if (path === "/api/search" && (method === "GET" || method === "HEAD")) {
       let q = (url.searchParams.get("q") || "").replace(/[\x00-\x1F\x7F]/g, "").replace(/\s+/g, " ").trim();
       if (q.length > 120) q = q.slice(0, 120);
@@ -1895,11 +2164,14 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     ::selection {
       background: transparent;
     }
-    /* Scrollbars */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.35); }
+    /* Scrollbars — v2.14: sin barras de scroll visibles EN NINGUN lado
+       (la del borde derecho al deslizar para abajo y las de modales/sliders).
+       El scroll sigue funcionando igual con dedo, rueda y teclado. */
+    *::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
+    *::-webkit-scrollbar-track { background: transparent !important; }
+    *::-webkit-scrollbar-thumb { background: transparent !important; }
+    * { scrollbar-width: none !important; }
+    html, body { -ms-overflow-style: none !important; }
 
     /* Left Sidebar Navigation (Desktop YouTube Music style) */
     .ytm-sidebar {
@@ -2004,6 +2276,70 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     .ytm-mobile-brand svg { width: 28px; height: 28px; }
     .ytm-mobile-brand span { font-weight: 800; font-size: 16px; color: #fff; }
 
+    /* AURORA-MUSIC v2.13: sugerencias en vivo tipo YT Music */
+    .ytm-suggest-box {
+      position: absolute;
+      top: 48px;
+      left: 0;
+      right: 0;
+      background: #101014;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 12px;
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
+      z-index: 260;
+      max-height: 384px;
+      overflow-y: auto;
+      padding: 4px 0;
+      animation: ytmSugIn 0.14s ease;
+    }
+    @keyframes ytmSugIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    .ytm-sug-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 44px;
+      padding: 0 14px;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 14px;
+    }
+    .ytm-sug-row svg { flex: none; color: var(--text-dim); }
+    .ytm-sug-row:hover, .ytm-sug-row.active { background: rgba(255, 255, 255, 0.08); }
+    .ytm-sug-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ytm-sug-pre { color: #fff; }
+    .ytm-sug-rest { color: var(--text-dim); }
+    .ytm-sug-x {
+      flex: none; width: 26px; height: 26px; border-radius: 50%;
+      border: none; background: transparent; color: var(--text-dim);
+      font-size: 16px; line-height: 1; cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .ytm-sug-x:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+    .ytm-correct-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 2px 4px 2px;
+      padding: 9px 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 10px;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+    .ytm-correct-chip b { color: #fff; font-weight: 600; }
+    .ytm-correct-chip.clickable { cursor: pointer; }
+    .ytm-correct-chip.clickable:hover { background: rgba(255, 255, 255, 0.09); }
+    @media (max-width: 520px) {
+      .ytm-suggest-box {
+        position: fixed;
+        top: var(--header-h, 64px);
+        left: 0;
+        right: 0;
+        max-height: 68vh;
+      }
+    }
+
     /* Pill Search Bar */
     .ytm-search-box {
       flex: 1;
@@ -2025,9 +2361,9 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       transition: all 0.2s;
     }
     .ytm-search-box input:focus {
-      background: rgba(255, 255, 255, 0.14);
-      border-color: var(--primary);
-      box-shadow: 0 0 16px var(--primary-glow);
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.16);
+      box-shadow: none;
     }
     .ytm-search-icon {
       position: absolute;
@@ -2264,7 +2600,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       background: rgba(255, 255, 255, 0.1);
     }
 
-    /* Cards Grid (Trending, Áálbums, Mixed) */
+    /* Cards Grid (Trending, Albums, Mixed) */
     .ytm-cards-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -3531,7 +3867,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       .app-toast { bottom: calc(var(--player-h) + 76px); }
       .ytm-header-actions .ytm-btn-pill span.pill-text { display: none; }
     }
-      /* Áálbums horizontal scroll */
+      /* Albums horizontal scroll */
     .ytm-horizontal-scroll {
       display: flex;
       gap: 14px;
@@ -3545,7 +3881,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     .ytm-horizontal-scroll::-webkit-scrollbar {
       display: none;
     }
-    .ytm-aálbum-card {
+    .ytm-album-card {
       flex: 0 0 150px;
       max-width: 150px;
       scroll-snap-align: start;
@@ -3555,13 +3891,14 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       padding: 10px;
       border: 1px solid rgba(255, 255, 255, 0.06);
       transition: background 0.2s, transform 0.2s, border-color 0.2s;
+      min-width: 0;
     }
-    .ytm-aálbum-card:hover {
+    .ytm-album-card:hover {
       background: rgba(255, 255, 255, 0.08);
       transform: translateY(-2px);
       border-color: rgba(56, 189, 248, 0.35);
     }
-    .ytm-aálbum-thumb {
+    .ytm-album-thumb {
       width: 130px;
       height: 130px;
       border-radius: 8px;
@@ -3571,7 +3908,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       background: #181818;
       box-shadow: 0 4px 12px rgba(0,0,0,0.4);
     }
-    .ytm-aálbum-title {
+    .ytm-album-title {
       font-size: 13px;
       font-weight: 600;
       color: #fff;
@@ -3580,7 +3917,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       white-space: nowrap;
       line-height: 1.3;
     }
-    .ytm-aálbum-sub {
+    .ytm-album-sub {
       font-size: 11.5px;
       color: var(--text-dim);
       overflow: hidden;
@@ -3683,14 +4020,17 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       transform: scale(1);
     }
 
-    /* Search Aálbums Grid */
-    .ytm-aálbums-search-grid {
+    /* Search Albums Grid — v2.14: fix de los selectores corruptos
+       (con la A duplicada) que dejaban las tarjetas sin estilo y los
+       álbumes salían GIGANTES a ancho completo. Grid real como YT Music,
+       2 columnas en móvil. */
+    .ytm-albums-search-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
       gap: 16px;
       margin-top: 8px;
     }
-    .ytm-search-aálbum-card {
+    .ytm-search-album-card {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 12px;
@@ -3699,13 +4039,14 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       display: flex;
       flex-direction: column;
+      min-width: 0;
     }
-    .ytm-search-aálbum-card:hover {
+    .ytm-search-album-card:hover {
       background: rgba(255, 255, 255, 0.08);
       border-color: rgba(255, 255, 255, 0.15);
       transform: translateY(-3px);
     }
-    .ytm-search-aálbum-thumb {
+    .ytm-search-album-thumb {
       width: 100%;
       aspect-ratio: 1;
       border-radius: 8px;
@@ -3714,7 +4055,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
       background: rgba(255, 255, 255, 0.05);
     }
-    .ytm-search-aálbum-title {
+    .ytm-search-album-title {
       font-size: 14px;
       font-weight: 600;
       color: #fff;
@@ -3723,12 +4064,19 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .ytm-search-aálbum-artist {
+    .ytm-search-album-artist {
       font-size: 12px;
       color: var(--text-dim);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    @media (max-width: 520px) {
+      .ytm-albums-search-grid { grid-template-columns: repeat(2, 1fr); gap: 14px 12px; margin-top: 12px; }
+      .ytm-search-album-card { padding: 8px; border-radius: 10px; }
+      .ytm-search-album-thumb { border-radius: 6px; }
+      .ytm-search-album-title { font-size: 13px; }
+      .ytm-search-album-artist { font-size: 11.5px; }
     }
 
     /* Library tabs & date headers */
@@ -3813,19 +4161,20 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       }
     }
 
-    /* Custom Áálbums Grid & Cards in Library */
-    .ytm-aálbums-grid {
+    /* Custom Albums Grid & Cards in Library — v2.14: fix selectores
+       corruptos ("aá"); title pasa a "name" que es la clase que usa el JS */
+    .ytm-albums-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
       gap: 18px;
     }
     @media (max-width: 600px) {
-      .ytm-aálbums-grid {
+      .ytm-albums-grid {
         grid-template-columns: repeat(2, 1fr);
         gap: 12px;
       }
     }
-    .ytm-user-aálbum-card {
+    .ytm-user-album-card {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 14px;
@@ -3835,13 +4184,14 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       display: flex;
       flex-direction: column;
       position: relative;
+      min-width: 0;
     }
-    .ytm-user-aálbum-card:hover {
+    .ytm-user-album-card:hover {
       background: rgba(255, 255, 255, 0.07);
       border-color: rgba(56, 189, 248, 0.35);
       transform: translateY(-3px);
     }
-    .ytm-user-aálbum-cover {
+    .ytm-user-album-cover {
       width: 100%;
       aspect-ratio: 1 / 1;
       border-radius: 10px;
@@ -3854,12 +4204,12 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       overflow: hidden;
       box-shadow: 0 6px 16px rgba(0,0,0,0.4);
     }
-    .ytm-user-aálbum-cover img {
+    .ytm-user-album-cover img {
       width: 100%;
       height: 100%;
       object-fit: cover;
     }
-    .ytm-user-aálbum-title {
+    .ytm-user-album-name {
       font-size: 14px;
       font-weight: 700;
       color: #fff;
@@ -3868,13 +4218,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       text-overflow: ellipsis;
       margin-bottom: 4px;
     }
-    .ytm-user-aálbum-count {
+    .ytm-user-album-count {
       font-size: 12px;
       color: var(--text-dim);
     }
 
-    /* Áálbum Detail View */
-    .aálbum-detail-hdr {
+    /* Album Detail View — v2.14: fix selectores corruptos */
+    .album-detail-hdr {
       display: flex;
       gap: 24px;
       align-items: flex-end;
@@ -3883,13 +4233,13 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
     @media (max-width: 600px) {
-      .aálbum-detail-hdr {
+      .album-detail-hdr {
         flex-direction: column;
         align-items: flex-start;
         gap: 16px;
       }
     }
-    .aálbum-detail-cover {
+    .album-detail-cover {
       width: 150px;
       height: 150px;
       border-radius: 14px;
@@ -3901,15 +4251,15 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       flex-shrink: 0;
       overflow: hidden;
     }
-    .aálbum-detail-cover img {
+    .album-detail-cover img {
       width: 100%;
       height: 100%;
       object-fit: cover;
     }
-    .aálbum-detail-info {
+    .album-detail-info {
       flex: 1;
     }
-    .aálbum-detail-actions {
+    .album-detail-actions {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
@@ -4058,7 +4408,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       .track-row:hover .track-row-play { opacity: 0; }
       .ytm-chip:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
       .ytm-quick-opt-btn:hover { background: none; color: var(--text-dim); }
-      .ytm-aálbum-card:hover { background: rgba(255, 255, 255, 0.04); transform: none; border-color: rgba(255, 255, 255, 0.06); }
+      .ytm-album-card:hover { background: rgba(255, 255, 255, 0.04); transform: none; border-color: rgba(255, 255, 255, 0.06); }
       .aurora-set-row:hover { background: rgba(255, 255, 255, 0.04); }
     }
 
@@ -4372,6 +4722,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         <svg class="ytm-search-icon" id="searchSubmitBtn" style="cursor:pointer;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <input type="text" id="searchInput" placeholder="Search songs, artists, genres or albums..." data-i18n-placeholder="searchPlaceholder" autocomplete="off">
         <button class="ytm-clear-btn" id="searchClear" onclick="clearSearch()">&times;</button>
+        <!-- AURORA-MUSIC v2.13: sugerencias en vivo tipo YT Music -->
+        <div class="ytm-suggest-box" id="searchSuggestBox" style="display:none;"></div>
       </div>
 
       <!-- Header Actions -->
@@ -4501,6 +4853,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
 
         <!-- Search Results Box -->
                 <div id="searchResultsContainer" style="display:none;">
+          <!-- AURORA-MUSIC v2.13: chip de correccion tipo YT Music ("Mostrando resultados para X") -->
+          <div class="ytm-correct-chip" id="searchCorrectionChip" style="display:none;"></div>
           <!-- YouTube Music Search Filter Tabs -->
           <div class="ytm-search-tabs">
             <button class="ytm-search-tab active" id="searchTabBtnSongs" onclick="switchSearchTab('songs')">
@@ -4954,7 +5308,7 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
 
       <!-- Artwork Box -->
       <div class="nowplaying-art-wrap">
-        <img class="nowplaying-big-cover" id="modalCover" src="" alt="Áálbum Art">
+        <img class="nowplaying-big-cover" id="modalCover" src="" alt="Álbum Art">
       </div>
 
       <!-- Track Info Row -->
@@ -5208,6 +5562,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "Guardar en un \u00e1lbum",
         selectAlbumOrCreate: "Selecciona un \u00e1lbum o crea uno:",
         recentSearches: "B\u00fasquedas recientes",
+        showingResultsFor: "Mostrando resultados para {q}",
+        didYouMean: "¿Quisiste decir {q}?",
         clearSearchHistory: "Borrar historial",
         suggestedSearches: "B\u00fasquedas sugeridas",
         searchHint: "Busca tus artistas, canciones o \u00e1lbumes favoritos...",
@@ -5360,6 +5716,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "Save to an album",
         selectAlbumOrCreate: "Select an album or create a new one:",
         recentSearches: "Recent searches",
+        showingResultsFor: "Showing results for {q}",
+        didYouMean: "Did you mean {q}?",
         clearSearchHistory: "Clear history",
         suggestedSearches: "Suggested searches",
         searchHint: "Search your favorite artists, songs or albums...",
@@ -5508,6 +5866,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "Salvar em um \u00e1lbum",
         selectAlbumOrCreate: "Selecione um \u00e1lbum ou crie um novo:",
         recentSearches: "Pesquisas recentes",
+        showingResultsFor: "Mostrando resultados para {q}",
+        didYouMean: "Você quis dizer {q}?",
         clearSearchHistory: "Limpar hist\u00f3rico",
         suggestedSearches: "Pesquisas sugeridas",
         searchHint: "Pesquise artistas, m\u00fasicas ou \u00e1lbuns...",
@@ -5651,6 +6011,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "Enregistrer dans un album",
         selectAlbumOrCreate: "S\u00e9lectionnez un album ou cr\u00e9ez-en un :",
         recentSearches: "Recherches r\u00e9centes",
+        showingResultsFor: "Affichage des résultats pour {q}",
+        didYouMean: "Vouliez-vous dire {q} ?",
         clearSearchHistory: "Effacer l'historique",
         suggestedSearches: "Suggestions",
         searchHint: "Recherchez des artistes, chansons ou albums...",
@@ -5794,6 +6156,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "In Album speichern",
         selectAlbumOrCreate: "Album ausw\u00e4hlen oder erstellen:",
         recentSearches: "Letzte Suchanfragen",
+        showingResultsFor: "Ergebnisse für {q} werden angezeigt",
+        didYouMean: "Meintest du {q}?",
         clearSearchHistory: "Verlauf l\u00f6schen",
         suggestedSearches: "Vorschl\u00e4ge",
         searchHint: "Suche nach K\u00fcnstlern, Titeln oder Alben...",
@@ -5937,6 +6301,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "Salva in un album",
         selectAlbumOrCreate: "Seleziona un album o creane uno:",
         recentSearches: "Ricerche recenti",
+        showingResultsFor: "Mostro i risultati per {q}",
+        didYouMean: "Forse cercavi: {q}",
         clearSearchHistory: "Cancella cronologia",
         suggestedSearches: "Suggerimenti",
         searchHint: "Cerca artisti, brani o album...",
@@ -6080,6 +6446,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0432 \u0430\u043b\u044c\u0431\u043e\u043c",
         selectAlbumOrCreate: "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0438\u043b\u0438 \u0441\u043e\u0437\u0434\u0430\u0439\u0442\u0435 \u0430\u043b\u044c\u0431\u043e\u043c:",
         recentSearches: "\u041d\u0435\u0434\u0430\u0432\u043d\u0438\u0439 \u043f\u043e\u0438\u0441\u043a",
+        showingResultsFor: "Показаны результаты по запросу {q}",
+        didYouMean: "Возможно, вы имели в виду {q}",
         clearSearchHistory: "\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u0438\u0441\u0442\u043e\u0440\u0438\u044e",
         suggestedSearches: "\u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u043c",
         searchHint: "\u0418\u0441\u0447\u0438\u0442\u0435 \u0438\u0441\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u0435\u0439 \u0438\u043b\u0438 \u0442\u0440\u0435\u043a\u0438...",
@@ -6223,6 +6591,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "\u30a2\u30eb\u30d0\u30e0\u306b\u4fdd\u5b58",
         selectAlbumOrCreate: "\u30a2\u30eb\u30d0\u30e0\u3092\u9078\u629e\u307e\u305f\u306f\u65b0\u898f\u4f5c\u6210:",
         recentSearches: "\u6700\u8fd1\u306e\u691c\u7d22",
+        showingResultsFor: "{q} の検索結果を表示しています",
+        didYouMean: "もしかして {q}",
         clearSearchHistory: "\u5c65\u6b74\u3092\u524a\u9664",
         suggestedSearches: "\u304a\u3059\u3059\u3081\u306e\u691c\u7d22",
         searchHint: "\u30a2\u30fc\u30c6\u30a3\u30b9\u30c8\u3001\u66f2\u3001\u30a2\u30eb\u30d0\u30e0\u3092\u691c\u7d22...",
@@ -6366,6 +6736,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "\uc568\ubc94\uc5d0 \uc800\uc7a5",
         selectAlbumOrCreate: "\uc568\ubc94\uc744 \uc120\ud0dd\ud558\uac70\ub098 \uc0c8\ub85c \ub9cc\ub4dc\uc138\uc694:",
         recentSearches: "\ucd5c\uadfc \uac80\uc0c9\uc5b4",
+        showingResultsFor: "{q}의 검색 결과를 표시하고 있습니다",
+        didYouMean: "다음을 찾으셨나요? {q}",
         clearSearchHistory: "\uae30\ub85d \uc0ad\uc81c",
         suggestedSearches: "\ucd94\ucc8c \uac80\uc0c9\uc5b4",
         searchHint: "\uc544\ud2f0\uc2a4\ud2b8, \ub178\ub798, \uc568\ubc94 \uac80\uc0c9...",
@@ -6509,6 +6881,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "\u4fdd\u5b58\u5230\u4e13\u8f91",
         selectAlbumOrCreate: "\u9009\u62e9\u4e13\u8f91\u6216\u65b0\u5efa\u4e13\u8f91:",
         recentSearches: "\u6700\u8fd1\u641c\u7d22",
+        showingResultsFor: "正在显示 {q} 的搜索结果",
+        didYouMean: "您是不是要找 {q}",
         clearSearchHistory: "\u6e05\u7a7a\u5386\u53f2",
         suggestedSearches: "\u63a8\u8350\u641c\u7d22",
         searchHint: "\u641c\u7d22\u827a\u4eba\u3001\u6b4c\u66f2\u6216\u4e13\u8f91...",
@@ -6652,6 +7026,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "\u062d\u0641\u0638 \u0641\u064a \u0623\u0644\u0628\u0648\u0645",
         selectAlbumOrCreate: "\u0627\u062e\u062a\u0631 \u0623\u0644\u0628\u0648\u0645\u0627\u064b \u0623\u0648 \u0623\u0646\u0634\u0626 \u0648\u0627\u062d\u062f\u0627\u064b:",
         recentSearches: "\u0639\u0645\u0644\u064a\u0627\u062a \u0627\u0644\u0628\u062d\u062b \u0627\u0644\u0623\u062e\u064a\u0631\u0629",
+        showingResultsFor: "عرض نتائج البحث عن {q}",
+        didYouMean: "هل تقصد {q}؟",
         clearSearchHistory: "\u0645\u0633\u062d \u0627\u0644\u0633\u062c\u0644",
         suggestedSearches: "\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a",
         searchHint: "\u0627\u0628\u062d\u062b \u0639\u0646 \u0641\u0646\u0627\u0646\u064a\u0646 \u0623\u0648 \u0623\u063a\u0627\u0646\u064a...",
@@ -6795,6 +7171,8 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         addToAlbum: "\u090f\u0932\u094d\u092c\u092e \u092e\u0947\u0902 \u0938\u0947\u0935 \u0915\u0930\u0947\u0902",
         selectAlbumOrCreate: "\u090f\u0915 \u090f\u0932\u094d\u092c\u092e \u091a\u0941\u0928\u0947\u0902 \u092f\u093e \u092c\u0928\u093e\u090f\u0902:",
         recentSearches: "\u0939\u093e\u0932\u093f\u092f\u093e \u0916\u094b\u091c",
+        showingResultsFor: "{q} के लिए नतीजे दिखाए जा रहे हैं",
+        didYouMean: "क्या आपका मतलब {q} है?",
         clearSearchHistory: "\u0907\u0924\u093f\u0939\u093e\u0938 \u092e\u093f\u091f\u093e\u090f\u0902",
         suggestedSearches: "\u0938\u0941\u091d\u093e\u0935",
         searchHint: "\u0915\u0932\u093e\u0915\u093e\u0930\u094b\u0902 \u092f\u093e \u0917\u093e\u0928\u094b\u0902 \u0915\u0940 \u0916\u094b\u091c \u0915\u0930\u0947\u0902...",
@@ -7348,6 +7726,205 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       } catch (_) {}
     }
 
+    // --------------------------------------------------------
+    // AURORA-MUSIC v2.13 — Sugerencias en vivo tipo YT Music
+    // Mientras escribes: tu historial local + el motor de sugerencias
+    // de YouTube Music (que corrige typos antes de buscar). Teclado:
+    // flechas mueven, Enter busca la activa, Esc cierra.
+    // --------------------------------------------------------
+    let sugTimer = null;
+    let sugAbort = null;
+    let sugRows = [];
+    let sugActive = -1;
+    let sugOpen = false;
+
+    function escHtml(s) {
+      return String(s || "").replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function hideSuggest() {
+      const box = $('searchSuggestBox');
+      if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+      sugActive = -1;
+      sugOpen = false;
+    }
+
+    function renderSuggest() {
+      const box = $('searchSuggestBox');
+      if (!box) return;
+      // v2.14: el input ya no tiene el foco (teclado cerrado / usuario se
+      // fue) -> una respuesta tardía NO reabre el panel sola
+      if (sInput && document.activeElement !== sInput) return;
+      if (!sugRows.length) { hideSuggest(); return; }
+      box.innerHTML = '';
+      sugRows.forEach((r, i) => {
+        const row = document.createElement('div');
+        row.className = 'ytm-sug-row' + (i === sugActive ? ' active' : '');
+        const svgSearch = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
+        const svgHistory = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+        const full = String(r.q || '');
+        const pre = String(r.pre || '');
+        let label;
+        if (r.kind === 'yt' && pre && full.toLowerCase().startsWith(pre.toLowerCase())) {
+          label = '<span class="ytm-sug-pre">' + escHtml(full.slice(0, pre.length)) + '</span><span class="ytm-sug-rest">' + escHtml(full.slice(pre.length)) + '</span>';
+        } else {
+          label = '<span class="ytm-sug-pre">' + escHtml(full) + '</span>';
+        }
+        row.innerHTML = (r.icon === 'history' ? svgHistory : svgSearch) +
+          '<div class="ytm-sug-text">' + label + '</div>' +
+          (r.kind === 'hist' ? '<button class="ytm-sug-x">&times;</button>' : '');
+        const xBtn = row.querySelector('.ytm-sug-x');
+        if (xBtn) {
+          xBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            try { dbDelete('recent_searches', r.key); } catch (_) {}
+            scheduleSuggest();
+          };
+        }
+        row.onclick = () => {
+          if (sInput) sInput.value = r.q;
+          hideSuggest();
+          executeSearch(r.q);
+        };
+        box.appendChild(row);
+      });
+      box.style.display = 'block';
+      sugOpen = true;
+    }
+
+    async function localHistMatches(q) {
+      const out = [];
+      try {
+        const all = await dbGetAll('recent_searches');
+        const ql = q.toLowerCase();
+        const starts = [];
+        const contains = [];
+        for (const it of all) {
+          const l = String(it.text || '').toLowerCase();
+          if (l.startsWith(ql)) starts.push(it);
+          else if (l.includes(ql)) contains.push(it);
+        }
+        starts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        contains.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        for (const it of [...starts, ...contains]) {
+          if (out.length >= 3) break;
+          out.push({ q: it.text, icon: 'history', kind: 'hist', key: it.query });
+        }
+      } catch (_) {}
+      return out;
+    }
+
+    async function fetchSuggest(q) {
+      if (sugAbort) { try { sugAbort.abort(); } catch (_) {} }
+      sugAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      try {
+        const res = await fetch('/api/suggest?q=' + encodeURIComponent(q) + '&hl=' + encodeURIComponent(currentLang || 'en'), sugAbort ? { signal: sugAbort.signal } : {});
+        if (!res.ok) return [];
+        const d = await res.json();
+        const items = (d && Array.isArray(d.items)) ? d.items : [];
+        return items.filter(x => x && x.q).map(x => ({
+          q: String(x.q),
+          pre: x.pre ? String(x.pre) : '',
+          icon: x.icon === 'history' ? 'history' : 'search',
+          kind: 'yt'
+        }));
+      } catch (_) {
+        return [];
+      }
+    }
+
+    async function runSuggest(val) {
+      const hist = await localHistMatches(val);
+      const yt = await fetchSuggest(val);
+      const seenQ = new Set(hist.map(h => String(h.q).toLowerCase()));
+      sugRows = [...hist, ...yt.filter(y => !seenQ.has(String(y.q).toLowerCase()))].slice(0, 10);
+      renderSuggest();
+    }
+
+    function scheduleSuggest() {
+      const val = (sInput ? sInput.value : '').replace(/\\s+/g, ' ').trim();
+      if (val.length < 2) { hideSuggest(); return; }
+      if (sugTimer) clearTimeout(sugTimer);
+      sugTimer = setTimeout(() => {
+        sugTimer = null;
+        runSuggest(val);
+      }, 180);
+    }
+
+    function moveSuggest(delta) {
+      if (!sugOpen || !sugRows.length) return false;
+      let idx = sugActive + delta;
+      if (idx < -1) idx = sugRows.length - 1;
+      if (idx >= sugRows.length) idx = -1;
+      sugActive = idx;
+      renderSuggest();
+      return true;
+    }
+
+    // Cerrar al hacer click fuera del search box
+    document.addEventListener('click', (ev) => {
+      const sbox = document.querySelector('.ytm-search-box');
+      if (sugOpen && sbox && !sbox.contains(ev.target)) hideSuggest();
+    });
+
+    // AURORA-MUSIC v2.14: al cerrarse el teclado SIN blur (botón atrás de
+    // Android) el visualViewport CRECE — el panel de sugerencias se quedaba
+    // abierto para siempre. Cerrar también al deslizar el contenido (como
+    // YT Music, que además baja el teclado) y soltar el foco para que una
+    // respuesta tardía de /api/suggest NO reabra el panel sola.
+    try {
+      const sugVv = window.visualViewport;
+      if (sugVv) {
+        let sugVvh = sugVv.height;
+        sugVv.addEventListener('resize', () => {
+          if (sugVv.height - sugVvh > 90 && sugOpen) {
+            hideSuggest();
+            try { if (sInput) sInput.blur(); } catch (_) {}
+          }
+          sugVvh = sugVv.height;
+        });
+      }
+    } catch (_) {}
+    document.addEventListener('scroll', (ev) => {
+      if (!sugOpen) return;
+      const sb = $('searchSuggestBox');
+      if (sb && ev.target && typeof ev.target.contains === 'function' &&
+          (ev.target === sb || sb.contains(ev.target))) return;
+      hideSuggest();
+      try { if (sInput) sInput.blur(); } catch (_) {}
+    }, true);
+
+    // AURORA-MUSIC v2.13: chip de correccion tipo YT Music.
+    // "Mostrando resultados para X" (autocorregido, no clicable) o
+    // "Quisiste decir X?" (clic -> busca la correccion).
+    function renderCorrectionChip(corr, originalQuery) {
+      const box = $('searchCorrectionChip');
+      if (!box) return;
+      if (!corr || !corr.query || corr.query.toLowerCase() === String(originalQuery || '').toLowerCase()) {
+        box.style.display = 'none';
+        box.innerHTML = '';
+        box.classList.remove('clickable');
+        box.onclick = null;
+        return;
+      }
+      const label = corr.type === 'showing'
+        ? (t('showingResultsFor') || 'Mostrando resultados para {q}')
+        : (t('didYouMean') || 'Did you mean {q}?');
+      const parts = String(label).split('{q}');
+      box.innerHTML = '<span>' + escHtml(parts[0]) + '<b>' + escHtml(corr.query) + '</b>' + escHtml(parts[1] || '') + '</span>';
+      box.style.display = 'flex';
+      if (corr.type === 'didYouMean') {
+        box.classList.add('clickable');
+        box.onclick = () => {
+          if (sInput) sInput.value = corr.query;
+          executeSearch(corr.query, { viaCorrection: true, originalTyped: originalQuery });
+        };
+      } else {
+        box.classList.remove('clickable');
+        box.onclick = null;
+      }
+    }
+
     function renderSearchSuggestions() {
       const c = $('searchSuggestChips');
       if (!c) return;
@@ -7444,11 +8021,15 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
     // --------------------------------------------------------
     // Search Execution
     // --------------------------------------------------------
-    async function executeSearch(query) {
-      const clean = (query || '').replace(/\s+/g, ' ').trim();
+    async function executeSearch(query, opts) {
+      // v2.13: \\s (doble) porque este script vive DENTRO de un template
+      // literal del worker; con una sola barra el template se la come y el
+      // replace amputaba las 's' de lo escrito ("despasito" -> "de pa ito").
+      const clean = (query || '').replace(/\\s+/g, ' ').trim();
       if (!clean) return;
 
       saveRecentSearch(clean);
+      hideSuggest();
       switchView('search');
 
       const recentBox = $('searchRecentContainer');
@@ -7475,6 +8056,24 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         const songs = data.results || [];
         const albums = data.albums || [];
         const artists = data.artists || [];
+        const correction = data.correction || null;
+
+        // AURORA-MUSIC v2.13: si YouTube entendio el typo pero no trajo
+        // nada con lo escrito, buscamos la correccion automaticamente
+        // (como hace YT Music) — el usuario ve el chip "Mostrando
+        // resultados para <corregido>". Solo 1 nivel: jamas loop.
+        if (!songs.length && !albums.length && !artists.length && correction && correction.query &&
+            correction.query.toLowerCase() !== clean.toLowerCase() && !(opts && opts.viaCorrection)) {
+          if (sInput) sInput.value = correction.query;
+          return executeSearch(correction.query, { viaCorrection: true, originalTyped: clean });
+        }
+
+        // chip de correccion (v2.13)
+        if (opts && opts.viaCorrection) {
+          renderCorrectionChip({ type: 'showing', query: clean }, opts.originalTyped || clean);
+        } else {
+          renderCorrectionChip(correction, clean);
+        }
 
         window._lastSearchResults = { songs, albums, artists };
 
@@ -9854,7 +10453,12 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
         sInput.addEventListener('focus', () => {
           if (sInput.value.trim().length === 0) {
             switchView('search');
+          } else if (sInput.value.trim().length >= 2) {
+            scheduleSuggest();
           }
+        });
+        sInput.addEventListener('blur', () => {
+          setTimeout(() => hideSuggest(), 200);
         });
         sInput.addEventListener('input', () => {
           const val = sInput.value.trim();
@@ -9866,10 +10470,31 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             if (recentBox) recentBox.style.display = 'block';
             if (resultsBox) resultsBox.style.display = 'none';
           }
+          scheduleSuggest();
         });
         sInput.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowDown') {
+            if (sugOpen) { e.preventDefault(); moveSuggest(1); }
+            return;
+          }
+          if (e.key === 'ArrowUp') {
+            if (sugOpen) { e.preventDefault(); moveSuggest(-1); }
+            return;
+          }
+          if (e.key === 'Escape') {
+            if (sugOpen) { e.preventDefault(); hideSuggest(); }
+            return;
+          }
           if (e.key === 'Enter') {
             e.preventDefault();
+            if (sugOpen && sugActive >= 0 && sugRows[sugActive]) {
+              const pick = sugRows[sugActive].q;
+              if (sInput) sInput.value = pick;
+              hideSuggest();
+              executeSearch(pick);
+              return;
+            }
+            hideSuggest();
             executeSearch(sInput.value);
           }
         });
@@ -9883,10 +10508,20 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
             sInput.focus();
           }
           sClear.style.display = 'none';
+          hideSuggest();
           const recentBox = $('searchRecentContainer');
           const resultsBox = $('searchResultsContainer');
           if (recentBox) recentBox.style.display = 'block';
           if (resultsBox) resultsBox.style.display = 'none';
+        };
+      }
+
+      // AURORA-MUSIC v2.13: la lupa tambien busca (antes era decorativa)
+      const sSubmit = $('searchSubmitBtn');
+      if (sSubmit) {
+        sSubmit.onclick = () => {
+          hideSuggest();
+          executeSearch(sInput ? sInput.value : '');
         };
       }
 
