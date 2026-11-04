@@ -1014,13 +1014,121 @@ const DEFAULT_TRENDING = [
   { id: "2Qt-h5gqbn8", title: "Feeling", artist: "Juice WRLD", album: "Death Race for Love", duration: 212, duration_text: "3:32", thumb: "https://i.ytimg.com/vi/2Qt-h5gqbn8/hqdefault.jpg", r2Ready: true, rank: 16 }
 ];
 
-let TRENDING_CACHE = { at: Date.now(), items: DEFAULT_TRENDING };
+// ------------------------------------------------------------
+// v2.11 — Tendencias EN VIVO (charts reales de YouTube Music)
+// ------------------------------------------------------------
+// El chart "Top 100 Music Videos Global" de YouTube Charts rota solo
+// (YouTube lo refresca a diario): la seccion Tendencias refleja el
+// chart real, como en YT Music. Fallback: chart de US; de ultimo
+// recurso la lista curada de siempre — jamas queda en blanco. Las
+// portadas cuadradas oficiales las resuelve la cadena v2.10 (iTunes
+// -> YTM -> Deezer, cache D1 perpetua) porque el chart trae
+// miniaturas de video.
+const TRENDING_TTL_MS = 2 * 60 * 60 * 1000; // chart fresco: 2h
+const TRENDING_RETRY_MS = 10 * 60 * 1000;   // reintento si fallo
+const YTM_CHART_PLAYLISTS = [
+  "PL4fGSI1pDJn5kI81J1fYWK5eZRl1zJ5kM", // Top 100 Music Videos Global (YouTube Charts)
+  "PL4fGSI1pDJn69On1f-8NAvX_CYlx7QyZc", // Top 100 Music Videos United States
+];
+
+let TRENDING_CACHE = { at: 0, items: DEFAULT_TRENDING };
+let TRENDING_FETCH_INFLIGHT = null;
+
+// Quita el ruido de titulo de video "(Official Music Video)",
+// "[Official Video]", "(Video Oficial)", "(Visualizer)", "(Lyric
+// Video)", "(Audio)", "(MV)"... SOLO si TODO el contenido del
+// parentesis es ruido de video; "(con X)", "(Remix)", "(Ao Vivo)" y
+// "(From \"...\")" se conservan intactos.
+function cleanChartTitle(t) {
+  const noise = new Set(["official", "music", "video", "videos", "oficial", "visualizer", "visualiser", "lyric", "lyrics", "audio", "videoclip", "mv", "hd", "4k"]);
+  return String(t || "")
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, (m) => {
+      const words = m.slice(1, -1).trim().toLowerCase().split(/\s+/).filter(Boolean);
+      return words.length && words.every(w => noise.has(w)) ? " " : m;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function fetchYTMChartTracks(playlistId) {
+  try {
+    const res = await fetch("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": YTM_UA,
+        "origin": "https://music.youtube.com",
+        "referer": "https://music.youtube.com/",
+      },
+      body: JSON.stringify({
+        context: { client: { clientName: "WEB_REMIX", clientVersion: YTM_CV, hl: "es", gl: "US" } },
+        browseId: "VL" + playlistId,
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const rows = [];
+    (function walk(node) {
+      if (!node || typeof node !== "object" || rows.length >= 40) return;
+      if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+      if (node.musicResponsiveListItemRenderer) {
+        const row = parseShelfItem(node);
+        if (row) rows.push(row);
+      }
+      for (const k in node) walk(node[k]);
+    })(json.contents || {});
+    const seen = new Set();
+    const out = [];
+    for (const row of rows) {
+      if (!row.id || seen.has(row.id)) continue;
+      seen.add(row.id);
+      out.push({
+        id: row.id,
+        title: cleanChartTitle(row.title) || row.title,
+        artist: row.artist || "Artista Aurora",
+        album: row.album || "Tendencias",
+        duration: row.duration || 0,
+        duration_text: row.duration_text,
+        thumb: row.thumb,
+        r2Ready: false,
+        rank: out.length + 1,
+      });
+      if (out.length >= 16) break;
+    }
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
 
 async function getTrendingTracks(env) {
-  if (TRENDING_CACHE.items && TRENDING_CACHE.items.length) {
+  const now = Date.now();
+  if (TRENDING_CACHE.items && TRENDING_CACHE.items.length && now - TRENDING_CACHE.at < TRENDING_TTL_MS) {
     return { results: TRENDING_CACHE.items };
   }
-  return { results: DEFAULT_TRENDING };
+  if (TRENDING_FETCH_INFLIGHT) return TRENDING_FETCH_INFLIGHT;
+  TRENDING_FETCH_INFLIGHT = (async () => {
+    let live = [];
+    for (const pl of YTM_CHART_PLAYLISTS) {
+      live = await fetchYTMChartTracks(pl);
+      if (live.length >= 8) break;
+      live = [];
+    }
+    if (live.length) {
+      TRENDING_CACHE = { at: Date.now(), items: live };
+    } else {
+      // chart inalcanzable: conserva lo que haya (o la curada) y reintenta pronto
+      const keep = TRENDING_CACHE.items && TRENDING_CACHE.items.length ? TRENDING_CACHE.items : DEFAULT_TRENDING;
+      TRENDING_CACHE = { at: Date.now() - TRENDING_TTL_MS + TRENDING_RETRY_MS, items: keep };
+    }
+    return { results: TRENDING_CACHE.items };
+  })();
+  try {
+    return await TRENDING_FETCH_INFLIGHT;
+  } finally {
+    TRENDING_FETCH_INFLIGHT = null;
+  }
 }
 
 async function getCuratedHome(env) {
@@ -1225,6 +1333,27 @@ export default {
       return jsonResponse(data);
     }
 
+    // AURORA-MUSIC v2.11: reproduccion contada en vivo — la seccion
+    // "Exitos Ultra HQ" (lo mas escuchado de la app) rota con el uso
+    // real, como los charts de YT Music. POST {vid} ->
+    // UPDATE songs SET plays = plays + 1 (no-op si no esta catalogada).
+    if (path === "/api/play" && method === "POST") {
+      let pvid = "";
+      try {
+        const body = await request.json();
+        pvid = String((body && body.vid) || "").trim();
+      } catch (_) {}
+      if (VID_ALIASES[pvid]) pvid = VID_ALIASES[pvid];
+      let counted = false;
+      if (pvid && pvid.length === 11 && env && env.DB) {
+        try {
+          await env.DB.prepare("UPDATE songs SET plays = plays + 1 WHERE vid = ?").bind(pvid).run();
+          counted = true;
+        } catch (_) {}
+      }
+      return jsonResponse({ ok: true, counted });
+    }
+
     // AURORA-MUSIC v2.9: portadas oficiales en lote (para entradas del
     // historial/favoritos guardadas antes del parche). POST {items:[{a,t}]}
     // -> {r: {"a\u241ft": url}} (url vacia = sin match confiable)
@@ -1298,8 +1427,9 @@ export default {
       vid = VID_ALIASES[vid] || vid;
       if (!vid || vid.length !== 11) return jsonResponse({ error: "ID de video inválido" }, 400);
 
-      // Check if in DEFAULT_TRENDING
-      const trendingMatch = DEFAULT_TRENDING.find(t => t.id === vid);
+      // Check trending: v2.11 — primero el chart EN VIVO, luego la curada
+      const trendingLive = TRENDING_CACHE.items && TRENDING_CACHE.items.length ? TRENDING_CACHE.items : DEFAULT_TRENDING;
+      const trendingMatch = trendingLive.find(t => t.id === vid) || DEFAULT_TRENDING.find(t => t.id === vid);
       if (trendingMatch) {
         // AURORA-MUSIC v2.9: portada oficial (no-op si ya esta enriquecido)
         await enrichTracksWithArt(env, [trendingMatch], 1);
@@ -7687,6 +7817,16 @@ const AURORA_MUSIC_HTML = `<!DOCTYPE html>
       }
 
       currentTrack = track;
+
+      // v2.11 — exitos Ultra HQ en vivo: contar la reproduccion real
+      // (fire-and-forget: si falla, no importa; reintenta la proxima)
+      try {
+        fetch('/api/play', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ vid: track.id })
+        }).catch(function () {});
+      } catch (_) {}
 
       // Sync track info with native Android notification & background service
       if (window.AndroidBridge && typeof window.AndroidBridge.onTrackChanged === 'function') {
